@@ -1,0 +1,328 @@
+import React, { useState } from 'react';
+import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid } from 'lucide-react';
+import { Category } from '../types';
+
+interface CatalogItem {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  category: string;
+  type: 'Service' | 'Product';
+  stock?: number;
+}
+
+const initialItems: CatalogItem[] = [
+  { id: '1', name: 'Diseño de Logo Pro', description: 'Incluye 3 propuestas conceptuales, manual de marca básico, exportación en formatos (AI, PNG, SVG) y cesión de derechos.', price: 1500, category: 'Diseño', type: 'Service' },
+  { id: '2', name: 'Mantenimiento PC', description: 'Limpieza física profunda, cambio de pasta térmica, optimización de software y eliminación de virus.', price: 250, category: 'Soporte', type: 'Service' },
+  { id: '3', name: 'Sello Automático Trodat', description: 'Sello marca Trodat 4911 personalizado con goma de alta resolución. Ideal para firmas.', price: 80, category: 'Insumos', type: 'Product', stock: 15 },
+];
+
+const initialCategories: Category[] = [
+    { id: 'c1', name: 'Diseño', type: 'Service' },
+    { id: 'c2', name: 'Soporte', type: 'Service' },
+    { id: 'c3', name: 'Desarrollo', type: 'Service' },
+    { id: 'c4', name: 'Insumos', type: 'Product' },
+    { id: 'c5', name: 'Equipos', type: 'Product' },
+];
+
+export const Services = () => {
+  const [items, setItems] = useState<CatalogItem[]>(initialItems);
+  const [categories, setCategories] = useState<Category[]>(initialCategories);
+  const [activeTab, setActiveTab] = useState<'Service' | 'Product'>('Service');
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Modals
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  
+  const [formData, setFormData] = useState<Partial<CatalogItem>>({
+      name: '', description: '', price: 0, category: '', stock: 0
+  });
+
+  const [newCategoryName, setNewCategoryName] = useState('');
+
+  // --- Actions ---
+
+  const handleEdit = (item: CatalogItem) => {
+      setFormData(item);
+      setEditingId(item.id);
+      setIsModalOpen(true);
+  };
+
+  const handleDelete = (id: string) => {
+      if(confirm('¿Eliminar ítem del catálogo?')) {
+          setItems(items.filter(i => i.id !== id));
+      }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (editingId) {
+          setItems(items.map(i => i.id === editingId ? { ...i, ...formData } as CatalogItem : i));
+      } else {
+          setItems([...items, { 
+              id: Math.random().toString(36).substr(2, 9),
+              type: activeTab,
+              ...formData 
+          } as CatalogItem]);
+      }
+      setIsModalOpen(false);
+  };
+
+  const openNew = () => {
+      setEditingId(null);
+      setFormData({ name: '', description: '', price: 0, category: categories.find(c => c.type === activeTab)?.name || '', stock: 0 });
+      setIsModalOpen(true);
+  };
+
+  const handleAddCategory = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (newCategoryName.trim()) {
+          setCategories([...categories, { id: Math.random().toString(36).substr(2, 5), name: newCategoryName, type: activeTab }]);
+          setNewCategoryName('');
+      }
+  };
+
+  const handleDeleteCategory = (id: string) => {
+      setCategories(categories.filter(c => c.id !== id));
+  };
+
+  // --- Sharing Logic ---
+
+  const formatShareText = (item: CatalogItem) => {
+      return `✨ *${item.name}* ✨\n\n📝 ${item.description}\n\n🏷️ *Categoría:* ${item.category}\n💰 *Precio:* Bs. ${item.price}\n${item.type === 'Product' ? `📦 *Stock:* ${item.stock} u.\n` : ''}\n📍 *Bráma Studio* - Soluciones Creativas\n📞 Contáctanos para más detalles.`;
+  };
+
+  const handleCopy = (item: CatalogItem) => {
+      const text = formatShareText(item);
+      navigator.clipboard.writeText(text);
+      setCopiedId(item.id);
+      setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleWhatsAppShare = (item: CatalogItem) => {
+      const text = formatShareText(item);
+      const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      window.open(url, '_blank');
+  };
+
+  const filteredItems = items.filter(i => 
+      i.type === activeTab && 
+      (i.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+       i.category.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
+
+  return (
+    <div className="space-y-6 h-full flex flex-col">
+       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Catálogo</h1>
+          <p className="text-sm text-gray-500">Administra y comparte tus servicios y productos</p>
+        </div>
+        <div className="flex gap-2">
+            <button 
+            onClick={() => setIsCategoryModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+            <Grid size={16} />
+            Categorías
+            </button>
+            <button 
+            onClick={openNew}
+            className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 shadow-lg shadow-brand-200 transition-all active:scale-95"
+            >
+            <Plus size={16} />
+            Nuevo {activeTab === 'Service' ? 'Servicio' : 'Producto'}
+            </button>
+        </div>
+      </div>
+
+      {/* Tabs - Improved Contrast */}
+      <div className="flex p-1 bg-white border border-gray-200 rounded-xl w-fit shadow-sm">
+          <button 
+            onClick={() => setActiveTab('Service')}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'Service' ? 'bg-brand-600 text-white shadow-md' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}
+          >
+             <Briefcase size={18} /> Servicios
+          </button>
+          <button 
+            onClick={() => setActiveTab('Product')}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'Product' ? 'bg-brand-600 text-white shadow-md' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}
+          >
+             <Package size={18} /> Productos
+          </button>
+      </div>
+
+      {/* Search */}
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+        <input 
+          type="text" 
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder={`Buscar ${activeTab === 'Service' ? 'servicios' : 'productos'}...`}
+          className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all shadow-sm text-gray-900 placeholder:text-gray-400"
+        />
+      </div>
+
+      {/* Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredItems.map(item => (
+              <div key={item.id} className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all group relative flex flex-col h-full">
+                  <div className="flex justify-between items-start mb-3">
+                      <span className="px-2.5 py-1 bg-gray-100 text-gray-600 text-[10px] uppercase font-bold rounded-lg tracking-wide border border-gray-200">
+                          {item.category}
+                      </span>
+                      <div className="flex gap-1">
+                          <button onClick={() => handleEdit(item)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                              <Edit3 size={16} />
+                          </button>
+                          <button onClick={() => handleDelete(item.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash2 size={16} />
+                          </button>
+                      </div>
+                  </div>
+                  
+                  <h3 className="font-bold text-gray-900 text-xl mb-2">{item.name}</h3>
+                  <p className="text-sm text-gray-600 mb-6 leading-relaxed flex-grow">{item.description}</p>
+                  
+                  <div className="mt-auto space-y-4">
+                    <div className="flex items-end justify-between pt-4 border-t border-gray-50">
+                        <div>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Precio</p>
+                            <p className="text-xl font-bold text-brand-600">Bs. {item.price}</p>
+                        </div>
+                        {item.type === 'Product' && (
+                            <div className="text-right">
+                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Stock</p>
+                                <p className={`font-semibold ${item.stock && item.stock < 5 ? 'text-red-500' : 'text-gray-700'}`}>
+                                    {item.stock} u.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => handleCopy(item)}
+                            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
+                        >
+                            {copiedId === item.id ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
+                            {copiedId === item.id ? 'Copiado' : 'Copiar info'}
+                        </button>
+                        <button 
+                            onClick={() => handleWhatsAppShare(item)}
+                            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-green-50 text-green-700 border border-green-100 text-sm font-medium hover:bg-green-100 transition-colors"
+                        >
+                            <Share2 size={16} />
+                            Compartir
+                        </button>
+                    </div>
+                  </div>
+              </div>
+          ))}
+      </div>
+
+      {/* Item Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h3 className="font-semibold text-lg text-gray-900">
+                  {editingId ? 'Editar Ítem' : `Nuevo ${activeTab === 'Service' ? 'Servicio' : 'Producto'}`}
+              </h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+               <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
+                  <input required type="text" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900" 
+                      value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+               </div>
+               <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+                  <textarea className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900 resize-none h-24" 
+                      value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
+               </div>
+               <div className="grid grid-cols-2 gap-4">
+                   <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Precio (Bs.)</label>
+                      <input required type="number" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900" 
+                          value={formData.price} onChange={e => setFormData({...formData, price: Number(e.target.value)})} />
+                   </div>
+                   <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
+                      <select 
+                        required 
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900"
+                        value={formData.category}
+                        onChange={e => setFormData({...formData, category: e.target.value})}
+                      >
+                          <option value="" disabled>Seleccionar...</option>
+                          {categories.filter(c => c.type === activeTab).map(c => (
+                              <option key={c.id} value={c.name}>{c.name}</option>
+                          ))}
+                      </select>
+                   </div>
+               </div>
+               {activeTab === 'Product' && (
+                   <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Stock Inicial</label>
+                      <input type="number" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900" 
+                          value={formData.stock} onChange={e => setFormData({...formData, stock: Number(e.target.value)})} />
+                   </div>
+               )}
+               <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors bg-white">Cancelar</button>
+                <button type="submit" className="flex-1 px-4 py-2 bg-brand-600 text-white rounded-xl font-medium hover:bg-brand-700 transition-colors shadow-lg shadow-brand-200">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Category Management Modal */}
+      {isCategoryModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                    <h3 className="font-semibold text-lg text-gray-900">Gestionar Categorías</h3>
+                    <button onClick={() => setIsCategoryModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                </div>
+                <div className="p-6">
+                    <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
+                        <input 
+                            type="text" 
+                            placeholder={`Nueva categoría de ${activeTab === 'Service' ? 'Servicios' : 'Productos'}`}
+                            className="flex-1 px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900"
+                            value={newCategoryName}
+                            onChange={(e) => setNewCategoryName(e.target.value)}
+                        />
+                        <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded-xl font-medium hover:bg-brand-700">
+                            <Plus size={20} />
+                        </button>
+                    </form>
+                    
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                        {categories.filter(c => c.type === activeTab).map(c => (
+                            <div key={c.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                <span className="font-medium text-gray-700">{c.name}</span>
+                                <button onClick={() => handleDeleteCategory(c.id)} className="text-gray-400 hover:text-red-500">
+                                    <Trash2 size={16} />
+                                </button>
+                            </div>
+                        ))}
+                        {categories.filter(c => c.type === activeTab).length === 0 && (
+                            <p className="text-center text-gray-500 text-sm py-4">No hay categorías creadas.</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+          </div>
+      )}
+    </div>
+  );
+};
