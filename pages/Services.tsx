@@ -1,21 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid } from 'lucide-react';
-import { Category } from '../types';
+import { Category, InventoryItem } from '../types';
+import { db } from '../firebase';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
-interface CatalogItem {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  category: string;
-  type: 'Service' | 'Product';
-  stock?: number;
-}
-
-const initialItems: CatalogItem[] = [
-  { id: '1', name: 'Diseño de Logo Pro', description: 'Incluye 3 propuestas conceptuales, manual de marca básico, exportación en formatos (AI, PNG, SVG) y cesión de derechos.', price: 1500, category: 'Diseño', type: 'Service' },
-  { id: '2', name: 'Mantenimiento PC', description: 'Limpieza física profunda, cambio de pasta térmica, optimización de software y eliminación de virus.', price: 250, category: 'Soporte', type: 'Service' },
-  { id: '3', name: 'Sello Automático Trodat', description: 'Sello marca Trodat 4911 personalizado con goma de alta resolución. Ideal para firmas.', price: 80, category: 'Insumos', type: 'Product', stock: 15 },
+const initialItems: InventoryItem[] = [
+  { id: '1', name: 'Diseño de Logo Pro', description: 'Incluye 3 propuestas conceptuales.', price: 1500, category: 'Diseño', type: 'Service', sku: 'SRV-001', quantity: 999, minStock: 0, status: 'In Stock', lastUpdated: '' },
+  { id: '3', name: 'Sello Trodat 4911', description: 'Sello automático personalizado.', price: 80, category: 'Insumos', type: 'Product', stock: 15, sku: 'PRD-001', quantity: 15, minStock: 5, status: 'In Stock', lastUpdated: '' },
 ];
 
 const initialCategories: Category[] = [
@@ -27,7 +18,7 @@ const initialCategories: Category[] = [
 ];
 
 export const Services = () => {
-  const [items, setItems] = useState<CatalogItem[]>(initialItems);
+  const [items, setItems] = useState<InventoryItem[]>(initialItems);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [activeTab, setActiveTab] = useState<'Service' | 'Product'>('Service');
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,25 +29,62 @@ export const Services = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   
-  const [formData, setFormData] = useState<Partial<CatalogItem>>({
-      name: '', description: '', price: 0, category: '', stock: 0
+  const [formData, setFormData] = useState<Partial<InventoryItem>>({
+      name: '', description: '', price: 0, category: '', quantity: 0
   });
 
   const [newCategoryName, setNewCategoryName] = useState('');
 
-  // Persist Categories to LS
+  // 1. Load Initial Data (Cloud + Local)
   useEffect(() => {
-      const savedCats = localStorage.getItem('crm_categories');
-      if (savedCats) setCategories(JSON.parse(savedCats));
+      const loadData = async () => {
+          // Categories
+          const savedCats = localStorage.getItem('crm_categories');
+          if (savedCats) setCategories(JSON.parse(savedCats));
+          else {
+              // Try Fetch Cloud
+              try {
+                  const docSnap = await getDoc(doc(db, 'crm_data', 'categories'));
+                  if(docSnap.exists()) {
+                      const list = docSnap.data().list;
+                      setCategories(list);
+                      localStorage.setItem('crm_categories', JSON.stringify(list));
+                  }
+              } catch(e) {}
+          }
+
+          // Items
+          const savedItems = localStorage.getItem('crm_inventory');
+          if (savedItems) setItems(JSON.parse(savedItems));
+      };
+      loadData();
   }, []);
 
+  // 2. Sync Categories to Cloud on Change
   useEffect(() => {
       localStorage.setItem('crm_categories', JSON.stringify(categories));
+      const syncCategories = async () => {
+          try {
+              await setDoc(doc(db, 'crm_data', 'categories'), { list: categories });
+          } catch(e) {}
+      };
+      syncCategories();
   }, [categories]);
+
+  // 3. Sync Items to Cloud on Change
+  useEffect(() => {
+      localStorage.setItem('crm_inventory', JSON.stringify(items));
+      const syncToCloud = async () => {
+         try {
+             await setDoc(doc(db, 'crm_data', 'inventory'), { list: items });
+         } catch(e) {}
+      };
+      syncToCloud();
+  }, [items]);
 
   // --- Actions ---
 
-  const handleEdit = (item: CatalogItem) => {
+  const handleEdit = (item: InventoryItem) => {
       setFormData(item);
       setEditingId(item.id);
       setIsModalOpen(true);
@@ -70,50 +98,65 @@ export const Services = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
       e.preventDefault();
+      const qty = Number(formData.quantity) || 0;
+      
       if (editingId) {
-          setItems(items.map(i => i.id === editingId ? { ...i, ...formData } as CatalogItem : i));
+          setItems(items.map(i => i.id === editingId ? { ...i, ...formData, quantity: qty, stock: qty } as InventoryItem : i));
       } else {
           setItems([...items, { 
               id: Math.random().toString(36).substr(2, 9),
               type: activeTab,
-              ...formData 
-          } as CatalogItem]);
+              sku: `${activeTab.substring(0,3).toUpperCase()}-${Math.floor(Math.random()*1000)}`,
+              minStock: 5,
+              status: 'In Stock',
+              lastUpdated: new Date().toISOString(),
+              ...formData,
+              quantity: qty,
+              stock: qty
+          } as InventoryItem]);
       }
       setIsModalOpen(false);
   };
 
   const openNew = () => {
       setEditingId(null);
-      setFormData({ name: '', description: '', price: 0, category: categories.find(c => c.type === activeTab)?.name || '', stock: 0 });
+      setFormData({ name: '', description: '', price: 0, category: categories.find(c => c.type === activeTab)?.name || '', quantity: 0 });
       setIsModalOpen(true);
   };
 
   const handleAddCategory = (e: React.FormEvent) => {
       e.preventDefault();
       if (newCategoryName.trim()) {
-          setCategories(prev => [...prev, { id: Math.random().toString(36).substr(2, 5), name: newCategoryName, type: activeTab }]);
+          const newCat: Category = { 
+              id: Math.random().toString(36).substr(2, 5), 
+              name: newCategoryName, 
+              type: activeTab 
+          };
+          setCategories(prev => [...prev, newCat]);
           setNewCategoryName('');
       }
   };
 
   const handleDeleteCategory = (id: string) => {
-      setCategories(categories.filter(c => c.id !== id));
+      if(confirm('¿Eliminar categoría?')) {
+          setCategories(categories.filter(c => c.id !== id));
+      }
   };
 
   // --- Sharing Logic ---
 
-  const formatShareText = (item: CatalogItem) => {
-      return `✨ *${item.name}* ✨\n\n📝 ${item.description}\n\n🏷️ *Categoría:* ${item.category}\n💰 *Precio:* Bs. ${item.price}\n${item.type === 'Product' ? `📦 *Stock:* ${item.stock} u.\n` : ''}\n📍 *Bráma Studio* - Soluciones Creativas\n📞 Contáctanos para más detalles.`;
+  const formatShareText = (item: InventoryItem) => {
+      return `✨ *${item.name}* ✨\n\n📝 ${item.description || 'Sin descripción'}\n\n🏷️ *Categoría:* ${item.category}\n💰 *Precio:* Bs. ${item.price}\n${item.type === 'Product' ? `📦 *Stock:* ${item.quantity} u.\n` : ''}\n📍 *Bráma Studio* - Soluciones Creativas\n📞 Contáctanos para más detalles.`;
   };
 
-  const handleCopy = (item: CatalogItem) => {
+  const handleCopy = (item: InventoryItem) => {
       const text = formatShareText(item);
       navigator.clipboard.writeText(text);
       setCopiedId(item.id);
       setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleWhatsAppShare = (item: CatalogItem) => {
+  const handleWhatsAppShare = (item: InventoryItem) => {
       const text = formatShareText(item);
       const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
       window.open(url, '_blank');
@@ -150,7 +193,7 @@ export const Services = () => {
         </div>
       </div>
 
-      {/* Tabs - Improved Contrast */}
+      {/* Tabs */}
       <div className="flex p-1 bg-white border border-gray-200 rounded-xl w-fit shadow-sm">
           <button 
             onClick={() => setActiveTab('Service')}
@@ -197,7 +240,7 @@ export const Services = () => {
                   </div>
                   
                   <h3 className="font-bold text-gray-900 text-xl mb-2">{item.name}</h3>
-                  <p className="text-sm text-gray-600 mb-6 leading-relaxed flex-grow">{item.description}</p>
+                  <p className="text-sm text-gray-600 mb-6 leading-relaxed flex-grow line-clamp-3">{item.description}</p>
                   
                   <div className="mt-auto space-y-4">
                     <div className="flex items-end justify-between pt-4 border-t border-gray-50">
@@ -208,8 +251,8 @@ export const Services = () => {
                         {item.type === 'Product' && (
                             <div className="text-right">
                                 <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Stock</p>
-                                <p className={`font-semibold ${item.stock && item.stock < 5 ? 'text-red-500' : 'text-gray-700'}`}>
-                                    {item.stock} u.
+                                <p className={`font-semibold ${item.quantity < 5 ? 'text-red-500' : 'text-gray-700'}`}>
+                                    {item.quantity} u.
                                 </p>
                             </div>
                         )}
@@ -221,14 +264,14 @@ export const Services = () => {
                             className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-50 transition-colors"
                         >
                             {copiedId === item.id ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
-                            {copiedId === item.id ? 'Copiado' : 'Copiar info'}
+                            {copiedId === item.id ? 'Copiado' : 'Copiar'}
                         </button>
                         <button 
                             onClick={() => handleWhatsAppShare(item)}
                             className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg bg-green-50 text-green-700 border border-green-100 text-sm font-medium hover:bg-green-100 transition-colors"
                         >
                             <Share2 size={16} />
-                            Compartir
+                            Enviar
                         </button>
                     </div>
                   </div>
@@ -282,7 +325,7 @@ export const Services = () => {
                    <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Stock Inicial</label>
                       <input type="number" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900" 
-                          value={formData.stock} onChange={e => setFormData({...formData, stock: Number(e.target.value)})} />
+                          value={formData.quantity} onChange={e => setFormData({...formData, quantity: Number(e.target.value)})} />
                    </div>
                )}
                <div className="pt-4 flex gap-3">

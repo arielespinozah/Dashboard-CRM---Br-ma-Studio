@@ -1,75 +1,143 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileText, Search, Filter, Download, MessageCircle, Plus, Trash2, X, Eye, Edit3, Save } from 'lucide-react';
-import { Quote, QuoteItem, AppSettings, Client } from '../types';
+import { FileText, Search, Plus, Trash2, X, Edit3, Save, Package, Download, RefreshCw, Share2, Copy, ExternalLink, Link as LinkIcon } from 'lucide-react';
+import { Quote, QuoteItem, AppSettings, Client, InventoryItem, User } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { db } from '../firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
-// Mock initial Data (kept for demo)
-const initialQuotes: Quote[] = [
-  { 
-      id: 'COT-2023-001', 
-      clientName: 'Juan Perez', 
-      date: '2023-10-24', 
-      validUntil: '2023-11-24',
-      subtotal: 1500,
-      tax: 0,
-      total: 1500, 
-      status: 'Approved', 
-      items: [
-          { id: '1', description: 'Diseño de Logo', quantity: 1, unitPrice: 1500, total: 1500 }
-      ] 
-  },
-];
+// Helper for currency
+const formatCurrency = (amount: number, settings: AppSettings) => {
+    const val = amount.toLocaleString(undefined, { minimumFractionDigits: settings.decimals, maximumFractionDigits: settings.decimals });
+    return settings.currencyPosition === 'before' ? `${settings.currencySymbol} ${val}` : `${val} ${settings.currencySymbol}`;
+};
+
+const initialQuotes: Quote[] = [];
 
 const defaultSettings: AppSettings = {
     companyName: 'Bráma Studio',
-    address: 'Calle 27 de Mayo Nro. 113, Santa Cruz, Bolivia',
+    address: 'Calle 27 de Mayo Nro. 113',
     website: 'www.brama.com.bo',
     phone: '+591 70000000',
     primaryColor: '#162836',
-    paymentInfo: 'Banco Ganadero\nCuenta: 123-45678-9',
-    termsAndConditions: 'Validez: 15 días.',
+    pdfHeaderColor: '#162836',
+    pdfSenderInfo: 'Bráma Studio\nCalle 27 de Mayo\nSanta Cruz',
+    pdfFooterText: 'www.brama.com.bo',
+    paymentInfo: '',
+    termsAndConditions: '',
     currencySymbol: 'Bs',
     currencyName: 'Bolivianos',
     currencyPosition: 'before',
     decimals: 2,
     taxRate: 13,
-    taxName: 'IVA'
+    taxName: 'IVA',
+    signatureName: 'Ariel Espinoza',
+    signatureTitle: 'CEO'
 };
 
 export const Quotations = () => {
-  const [quotes, setQuotes] = useState<Quote[]>(initialQuotes);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+      const saved = localStorage.getItem('crm_active_user');
+      return saved ? JSON.parse(saved) : null;
+  });
+
+  const [quotes, setQuotes] = useState<Quote[]>(() => {
+      const saved = localStorage.getItem('crm_quotes');
+      return saved ? JSON.parse(saved) : initialQuotes;
+  });
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingQuote, setViewingQuote] = useState<Quote | null>(null);
   const [pdfPreview, setPdfPreview] = useState<Quote | null>(null);
+  const [shareQuote, setShareQuote] = useState<Quote | null>(null); // For Share Modal
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   
-  // Client Selection
+  // Data State
   const [availableClients, setAvailableClients] = useState<Client[]>([]);
+  const [availableInventory, setAvailableInventory] = useState<InventoryItem[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+
+  // Modals
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
-  const [clientSearch, setClientSearch] = useState('');
+  const [isCatalogModalOpen, setIsCatalogModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  
+  // Client Modal State for Creation
+  const [clientSearchMode, setClientSearchMode] = useState(true);
+  const [newClientName, setNewClientName] = useState('');
+  
+  // Catalog State
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogTab, setCatalogTab] = useState<'All' | 'Service' | 'Product'>('All');
+  const [catalogCategory, setCatalogCategory] = useState<string>('All');
 
-  // Tax Toggle State for the current form
   const [taxEnabled, setTaxEnabled] = useState(false);
-
   const printRef = useRef<HTMLDivElement>(null);
 
-  // Load settings
-  useEffect(() => {
-      const saved = localStorage.getItem('crm_settings');
-      if (saved) setSettings(JSON.parse(saved));
+  // Sync quotes to Firestore
+  const saveQuotes = async (newQuotes: Quote[]) => {
+      setQuotes(newQuotes);
+      localStorage.setItem('crm_quotes', JSON.stringify(newQuotes));
+      try {
+          await setDoc(doc(db, 'crm_data', 'quotes'), { list: newQuotes });
+      } catch(e) {}
+  };
 
-      const savedClients = localStorage.getItem('crm_clients');
-      if (savedClients) setAvailableClients(JSON.parse(savedClients));
+  // Load settings & data (Robust Sync)
+  useEffect(() => {
+      const fetchData = async () => {
+          const savedSettings = localStorage.getItem('crm_settings');
+          if (savedSettings) setSettings({ ...defaultSettings, ...JSON.parse(savedSettings) });
+
+          let localClients = localStorage.getItem('crm_clients');
+          if (localClients) setAvailableClients(JSON.parse(localClients));
+          else {
+              setIsLoadingData(true);
+              try {
+                  const docSnap = await getDoc(doc(db, 'crm_data', 'clients'));
+                  if (docSnap.exists()) {
+                      const list = docSnap.data().list;
+                      setAvailableClients(list);
+                      localStorage.setItem('crm_clients', JSON.stringify(list));
+                  }
+              } catch(e) {}
+          }
+
+          let localInv = localStorage.getItem('crm_inventory');
+          if (localInv) setAvailableInventory(JSON.parse(localInv));
+          else {
+              if(!isLoadingData) setIsLoadingData(true);
+              try {
+                  const docSnap = await getDoc(doc(db, 'crm_data', 'inventory'));
+                  if (docSnap.exists()) {
+                      const list = docSnap.data().list;
+                      setAvailableInventory(list);
+                      localStorage.setItem('crm_inventory', JSON.stringify(list));
+                  }
+              } catch(e) {}
+          }
+
+          try {
+              const docSnap = await getDoc(doc(db, 'crm_data', 'quotes'));
+              if(docSnap.exists()) {
+                  const cloudQuotes = docSnap.data().list;
+                  setQuotes(cloudQuotes);
+                  localStorage.setItem('crm_quotes', JSON.stringify(cloudQuotes));
+              }
+          } catch(e) {}
+          
+          setIsLoadingData(false);
+      };
+      fetchData();
   }, []);
 
   // Form State
   const [newQuote, setNewQuote] = useState<Partial<Quote>>({
       clientName: '',
+      clientEmail: '', 
       date: new Date().toISOString().split('T')[0],
-      validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      validUntil: new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0],
       status: 'Draft',
       items: [],
       subtotal: 0,
@@ -77,12 +145,7 @@ export const Quotations = () => {
       total: 0
   });
 
-  const formatCurrency = (amount: number) => {
-      const val = amount.toLocaleString(undefined, { minimumFractionDigits: settings.decimals, maximumFractionDigits: settings.decimals });
-      return settings.currencyPosition === 'before' ? `${settings.currencySymbol} ${val}` : `${val} ${settings.currencySymbol}`;
-  };
-
-  // Recalculate totals whenever items or taxEnabled changes
+  // Recalculate totals
   useEffect(() => {
       const sub = newQuote.items?.reduce((acc, item) => acc + item.total, 0) || 0;
       const tax = taxEnabled ? sub * (settings.taxRate / 100) : 0;
@@ -90,7 +153,7 @@ export const Quotations = () => {
       setNewQuote(prev => ({ ...prev, subtotal: sub, tax, total }));
   }, [newQuote.items, taxEnabled, settings.taxRate]);
 
-  const addItem = () => {
+  const addManualItem = () => {
       const newItem: QuoteItem = {
           id: Math.random().toString(36).substr(2, 9),
           description: '',
@@ -99,6 +162,18 @@ export const Quotations = () => {
           total: 0
       };
       setNewQuote(prev => ({ ...prev, items: [...(prev.items || []), newItem] }));
+  };
+
+  const addItemFromCatalog = (item: InventoryItem) => {
+      const newItem: QuoteItem = {
+          id: Math.random().toString(36).substr(2, 9),
+          description: item.name,
+          quantity: 1,
+          unitPrice: item.price,
+          total: item.price
+      };
+      setNewQuote(prev => ({ ...prev, items: [...(prev.items || []), newItem] }));
+      setIsCatalogModalOpen(false);
   };
 
   const updateItem = (id: string, field: keyof QuoteItem, value: any) => {
@@ -124,44 +199,80 @@ export const Quotations = () => {
   const openEdit = (quote: Quote) => {
       setViewingQuote(null);
       setNewQuote(quote);
-      setTaxEnabled(!!quote.taxEnabled); // Restore tax toggle state
+      setTaxEnabled(!!quote.taxEnabled); 
       setEditingId(quote.id);
       setIsModalOpen(true);
   };
 
+  const handleDelete = (id: string) => {
+      if (currentUser?.role !== 'Admin') {
+          alert('Acción denegada. Solo el administrador puede eliminar cotizaciones.');
+          return;
+      }
+      if (confirm('¿Eliminar cotización permanentemente?')) {
+          saveQuotes(quotes.filter(q => q.id !== id));
+      }
+  };
+
   const handleSelectClient = (client: Client) => {
-      setNewQuote(prev => ({ ...prev, clientName: client.name }));
+      setNewQuote(prev => ({ 
+          ...prev, 
+          clientName: client.name,
+          clientEmail: client.email || '' 
+      }));
       setIsClientModalOpen(false);
+  };
+  
+  const handleQuickCreateClient = () => {
+      if(newClientName.trim()) {
+          const client: Client = {
+              id: Math.random().toString(36).substr(2,9),
+              name: newClientName,
+              company: 'Nuevo Cliente',
+              email: '',
+              phone: '',
+              type: 'Prospect'
+          };
+          const updated = [...availableClients, client];
+          setAvailableClients(updated);
+          localStorage.setItem('crm_clients', JSON.stringify(updated));
+          setDoc(doc(db, 'crm_data', 'clients'), { list: updated });
+          handleSelectClient(client);
+      }
   };
 
   const handleSave = (e: React.FormEvent) => {
       e.preventDefault();
       
+      const validItems = newQuote.items?.filter(i => i.description.trim() !== '' && i.total > 0) || [];
+      
+      if(validItems.length === 0) {
+          alert("Debe agregar al menos un ítem con descripción y precio.");
+          return;
+      }
+
       const quoteData: Quote = {
           ...(newQuote as Quote),
-          taxEnabled: taxEnabled // Persist tax state
+          items: validItems,
+          taxEnabled: taxEnabled
       };
 
       if (editingId) {
-          setQuotes(prev => prev.map(q => q.id === editingId ? { ...quoteData, id: editingId } : q));
+          saveQuotes(quotes.map(q => q.id === editingId ? { ...quoteData, id: editingId } : q));
       } else {
           const quoteId = `COT-${new Date().getFullYear()}-${String(quotes.length + 1).padStart(3, '0')}`;
-          setQuotes([{ ...quoteData, id: quoteId }, ...quotes]);
+          saveQuotes([{ ...quoteData, id: quoteId }, ...quotes]);
       }
       setIsModalOpen(false);
   };
 
-  const handleShareWhatsApp = (quote: Quote) => {
-     const itemsList = quote.items.map(i => `- ${i.description} (${i.quantity} x ${formatCurrency(i.unitPrice)})`).join('%0A');
-     const text = `Hola *${quote.clientName}*,%0A%0AEspero que estés muy bien.%0A%0ADesde *${settings.companyName}* te enviamos el detalle de la cotización *${quote.id}*:%0A%0A${itemsList}%0A%0A*Total: ${formatCurrency(quote.total)}*%0A%0ADescarga el PDF adjunto para más detalle.%0A%0ASaludos,%0AEquipo ${settings.companyName}`;
-     window.open(`https://wa.me/?text=${text}`, '_blank');
-  };
-
+  // --- PDF & SHARE LOGIC ---
   const preparePDFDownload = (quote: Quote) => {
       setPdfPreview(quote);
+      // Wait for DOM render
       setTimeout(() => {
           if (printRef.current) {
-              html2canvas(printRef.current, { scale: 2, useCORS: true }).then(canvas => {
+              html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false }).then(canvas => {
                   const imgData = canvas.toDataURL('image/png');
                   const pdf = new jsPDF('p', 'mm', 'a4');
                   const pdfWidth = pdf.internal.pageSize.getWidth();
@@ -174,400 +285,386 @@ export const Quotations = () => {
       }, 500);
   };
 
-  const StatusBadge = ({ status }: { status: string }) => {
-    const styles: Record<string, string> = {
-      Approved: 'bg-green-100 text-green-700',
-      Sent: 'bg-blue-100 text-blue-700',
-      Draft: 'bg-gray-100 text-gray-700',
-      Paid: 'bg-purple-100 text-purple-700',
-      Rejected: 'bg-red-100 text-red-700',
-    };
-    return (
-      <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${styles[status] || styles.Draft}`}>
-        {status === 'Approved' ? 'Aprobado' : status === 'Sent' ? 'Enviado' : status === 'Draft' ? 'Borrador' : status}
-      </span>
-    );
+  const openShareModal = (quote: Quote) => {
+      setShareQuote(quote);
+      setIsShareModalOpen(true);
   };
+
+  const handleShareWhatsApp = () => {
+      if (!shareQuote) return;
+      // Simulated Link
+      const link = `https://brama.studio/q/${shareQuote.id.toLowerCase()}`;
+      const text = `Hola ${shareQuote.clientName}, adjunto la Cotización *${shareQuote.id}*. Puedes verla y descargarla aquí: ${link}`;
+      const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      window.open(url, '_blank');
+  };
+
+  const handleCopyLink = () => {
+      if (!shareQuote) return;
+      const link = `https://brama.studio/q/${shareQuote.id.toLowerCase()}`;
+      navigator.clipboard.writeText(link);
+      alert('Enlace copiado al portapapeles');
+  };
+
+  // Helper to find client details
+  const getClientDetails = (name: string) => {
+      return availableClients.find(c => c.name === name);
+  };
+
+  const categories = ['All', ...Array.from(new Set(availableInventory.map(i => i.category)))];
+
+  const filteredCatalog = availableInventory.filter(item => {
+      const matchesTab = catalogTab === 'All' ? true : item.type === catalogTab;
+      const matchesCategory = catalogCategory === 'All' ? true : item.category === catalogCategory;
+      const matchesSearch = item.name.toLowerCase().includes(catalogSearch.toLowerCase()) || 
+                            item.sku.toLowerCase().includes(catalogSearch.toLowerCase());
+      return matchesTab && matchesCategory && matchesSearch;
+  });
+
+  const filteredClients = availableClients.filter(c => c.name.toLowerCase().includes(catalogSearch.toLowerCase()));
 
   return (
     <div className="space-y-6 relative h-full">
-      {/* Header Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Cotizaciones</h1>
           <p className="text-sm text-gray-500">Administra tus propuestas comerciales</p>
         </div>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => {
-                setEditingId(null);
-                setNewQuote({
-                    clientName: '', date: new Date().toISOString().split('T')[0],
-                    validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                    status: 'Draft', items: [], subtotal: 0, tax: 0, total: 0
-                });
-                setTaxEnabled(false);
-                addItem(); 
-                setIsModalOpen(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg shadow-brand-900/20 transition-all active:scale-95"
-          >
+        <button onClick={() => { setEditingId(null); setNewQuote({ clientName: '', date: new Date().toISOString().split('T')[0], validUntil: new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0], status: 'Draft', items: [], subtotal: 0, tax: 0, total: 0 }); setTaxEnabled(false); setIsModalOpen(true); }} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg active:scale-95">
             <Plus size={16} /> Nueva Cotización
-          </button>
-        </div>
+        </button>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-        <input 
-          type="text" 
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Buscar cotizaciones..." 
-          className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-900/20 focus:border-brand-900 transition-all shadow-sm text-gray-900"
-        />
-      </div>
-
-      {/* List */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-            <thead>
-                <tr className="bg-gray-50/50 border-b border-gray-100">
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">ID</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Cliente</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fecha</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Estado</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Acciones</th>
+        <table className="w-full text-left border-collapse">
+            <thead className="bg-gray-50/50 border-b border-gray-100">
+                <tr>
+                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">ID</th>
+                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Cliente</th>
+                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Total</th>
+                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right">Acciones</th>
                 </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-                {quotes.filter(q => 
-                    q.clientName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                    q.id.toLowerCase().includes(searchTerm.toLowerCase())
-                ).map((quote) => (
-                <tr key={quote.id} className="hover:bg-gray-50 transition-colors group cursor-pointer" onClick={() => setViewingQuote(quote)}>
+                {quotes.map((quote) => (
+                <tr key={quote.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => preparePDFDownload(quote)}>
                     <td className="px-6 py-4 text-sm font-medium text-brand-900">{quote.id}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900 font-medium">{quote.clientName}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{quote.date}</td>
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(quote.total)}</td>
-                    <td className="px-6 py-4 text-sm"><StatusBadge status={quote.status} /></td>
-                    <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex justify-end gap-1">
-                        <button onClick={() => preparePDFDownload(quote)} className="p-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg tooltip transition-colors" title="Descargar PDF">
-                             <Download size={18} />
-                        </button>
-                        <button onClick={() => setViewingQuote(quote)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                            <Eye size={18} />
-                        </button>
-                    </div>
+                    <td className="px-6 py-4 text-sm text-gray-900">{quote.clientName}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(quote.total, settings)}</td>
+                    <td className="px-6 py-4 text-right flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                        <button onClick={() => openShareModal(quote)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Compartir"><Share2 size={18}/></button>
+                        <button onClick={() => preparePDFDownload(quote)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg" title="Descargar PDF"><Download size={18} /></button>
+                        <button onClick={() => openEdit(quote)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Editar"><Edit3 size={18} /></button>
+                        {currentUser?.role === 'Admin' && (
+                            <button onClick={() => handleDelete(quote.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Eliminar"><Trash2 size={18} /></button>
+                        )}
                     </td>
                 </tr>
                 ))}
+                {quotes.length === 0 && <tr><td colSpan={4} className="text-center py-8 text-gray-400">No hay cotizaciones</td></tr>}
             </tbody>
-            </table>
-        </div>
+        </table>
       </div>
 
-      {/* CREATE / EDIT Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden animate-in fade-in zoom-in duration-200 my-8">
             <div className="px-8 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 sticky top-0 z-10">
-              <div>
-                <h3 className="font-bold text-xl text-gray-900">{editingId ? 'Editar Cotización' : 'Nueva Cotización'}</h3>
-                <p className="text-sm text-gray-500">Detalles de la propuesta</p>
-              </div>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 bg-white p-2 rounded-full border border-gray-200"><X size={20} /></button>
+              <h3 className="font-bold text-xl text-gray-900">{editingId ? 'Editar Cotización' : 'Nueva Cotización'}</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
-            
             <form onSubmit={handleSave} className="p-8 space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-1">
-                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Cliente</label>
-                   <div className="flex gap-2">
-                       <input required type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900"
-                          value={newQuote.clientName} onChange={e => setNewQuote({...newQuote, clientName: e.target.value})} placeholder="Nombre del cliente"/>
-                       <button type="button" onClick={() => setIsClientModalOpen(true)} className="px-3 py-2 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200" title="Buscar Cliente">
-                            <Search size={20} />
-                       </button>
-                   </div>
+                <div className="grid grid-cols-3 gap-4">
+                    <div className="flex gap-2 relative">
+                        <input required className="w-full border border-gray-300 rounded-xl px-4 py-2 bg-white text-gray-900 outline-none focus:border-brand-500" placeholder="Cliente" value={newQuote.clientName} onChange={e => setNewQuote({...newQuote, clientName: e.target.value})} />
+                        <button type="button" onClick={() => { setClientSearchMode(true); setIsClientModalOpen(true); }} className="px-3 bg-brand-900 text-white rounded-xl hover:bg-brand-800 border border-brand-900 shadow-md"><Search size={18}/></button>
+                    </div>
+                    <input type="date" className="border border-gray-300 rounded-xl px-4 py-2 bg-white text-gray-900 outline-none" value={newQuote.date} onChange={e => setNewQuote({...newQuote, date: e.target.value})} />
+                    <input type="date" className="border border-gray-300 rounded-xl px-4 py-2 bg-white text-gray-900 outline-none" value={newQuote.validUntil} onChange={e => setNewQuote({...newQuote, validUntil: e.target.value})} />
                 </div>
+                
+                {/* Items Section */}
                 <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Fecha Emisión</label>
-                   <input type="date" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900"
-                      value={newQuote.date} onChange={e => setNewQuote({...newQuote, date: e.target.value})} />
+                    <div className="flex justify-between items-center mb-4">
+                        <h4 className="font-bold text-gray-700 text-sm">Ítems de la Cotización</h4>
+                        <button type="button" onClick={() => setIsCatalogModalOpen(true)} className="text-sm bg-brand-50 text-brand-900 px-3 py-1.5 rounded-lg font-medium flex items-center gap-2 border border-brand-200 hover:bg-brand-100"><Package size={16}/> Catálogo</button>
+                    </div>
+                    <div className="grid grid-cols-12 gap-2 mb-2 px-2 text-xs font-bold text-gray-500 uppercase">
+                         <div className="col-span-6">Descripción</div>
+                         <div className="col-span-2 text-center">Cant.</div>
+                         <div className="col-span-3 text-right">P. Unit</div>
+                         <div className="col-span-1"></div>
+                    </div>
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                        {newQuote.items?.map((item, idx) => (
+                            <div key={idx} className="grid grid-cols-12 gap-2 items-center bg-gray-50 p-2 rounded-lg border border-gray-100">
+                                <div className="col-span-6"><input className="w-full bg-transparent border-b border-gray-300 px-1 py-1 text-gray-900 outline-none focus:border-brand-500 text-sm" value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} /></div>
+                                <div className="col-span-2"><input className="w-full bg-transparent border-b border-gray-300 px-1 py-1 text-center text-gray-900 outline-none focus:border-brand-500 text-sm" type="number" value={item.quantity} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} /></div>
+                                <div className="col-span-3"><input className="w-full bg-transparent border-b border-gray-300 px-1 py-1 text-right text-gray-900 outline-none focus:border-brand-500 text-sm" type="number" value={item.unitPrice} onChange={e => updateItem(item.id, 'unitPrice', Number(e.target.value))} /></div>
+                                <div className="col-span-1 text-right"><button type="button" onClick={() => removeItem(item.id)} className="p-1.5 hover:bg-red-100 rounded text-red-400 hover:text-red-600"><Trash2 size={16}/></button></div>
+                            </div>
+                        ))}
+                    </div>
+                    <button type="button" onClick={addManualItem} className="mt-3 text-xs text-blue-600 font-bold hover:underline flex items-center gap-1"><Plus size={12}/> Agregar Fila Manual</button>
                 </div>
-                <div>
-                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Válida Hasta</label>
-                   <input type="date" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900"
-                      value={newQuote.validUntil} onChange={e => setNewQuote({...newQuote, validUntil: e.target.value})} />
+
+                <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    <label className="flex items-center gap-3 cursor-pointer select-none">
+                        <button type="button" onClick={() => setTaxEnabled(!taxEnabled)} className={`w-9 h-5 rounded-full transition-colors flex items-center px-0.5 ${taxEnabled ? 'bg-brand-900' : 'bg-gray-300'}`}>
+                            <div className={`w-4 h-4 bg-white rounded-full shadow transform transition-transform ${taxEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                        </button>
+                        <span className="text-sm font-bold text-gray-700">Incluir {settings.taxName} ({settings.taxRate}%)</span>
+                    </label>
+                    <div className="text-right"><span className="text-xl font-bold text-brand-900">{formatCurrency(newQuote.total || 0, settings)}</span></div>
                 </div>
-              </div>
-
-              <div>
-                 <div className="flex justify-between items-center mb-4">
-                    <h4 className="font-semibold text-gray-800">Ítems / Servicios</h4>
-                    <button type="button" onClick={addItem} className="text-sm flex items-center gap-1.5 text-brand-900 font-medium bg-brand-50 px-3 py-1.5 rounded-lg hover:bg-brand-100 transition-colors">
-                        <Plus size={16} /> Agregar
-                    </button>
-                 </div>
-                 <div className="space-y-3">
-                     {newQuote.items?.map((item) => (
-                         <div key={item.id} className="flex gap-4 items-start bg-gray-50/50 p-3 rounded-xl border border-gray-100">
-                             <div className="flex-1">
-                                 <input type="text" placeholder="Descripción" className="w-full bg-transparent border-b border-gray-300 focus:border-brand-900 outline-none px-1 py-1 text-sm text-gray-900"
-                                    value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} required />
-                             </div>
-                             <div className="w-20">
-                                 <input type="number" placeholder="Cant." min="1" className="w-full bg-transparent border-b border-gray-300 focus:border-brand-900 outline-none px-1 py-1 text-sm text-center text-gray-900"
-                                    value={item.quantity} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} />
-                             </div>
-                             <div className="w-24">
-                                 <input type="number" placeholder="Precio" min="0" className="w-full bg-transparent border-b border-gray-300 focus:border-brand-900 outline-none px-1 py-1 text-sm text-right text-gray-900"
-                                    value={item.unitPrice} onChange={e => updateItem(item.id, 'unitPrice', Number(e.target.value))} />
-                             </div>
-                             <div className="w-28 text-right text-sm font-medium py-1 text-gray-700">{formatCurrency(item.total)}</div>
-                             <button type="button" onClick={() => removeItem(item.id)} className="text-gray-400 hover:text-red-500 p-1"><Trash2 size={16} /></button>
-                         </div>
-                     ))}
-                 </div>
-              </div>
-
-              <div className="bg-gray-50 p-6 rounded-xl border border-gray-100">
-                 <div className="flex justify-between items-center mb-2">
-                     <div className="flex items-center gap-2">
-                         <input 
-                            type="checkbox" 
-                            id="taxToggle"
-                            checked={taxEnabled} 
-                            onChange={(e) => setTaxEnabled(e.target.checked)}
-                            className="w-4 h-4 text-brand-900 rounded focus:ring-brand-900 border-gray-300"
-                         />
-                         <label htmlFor="taxToggle" className="text-sm text-gray-700 font-medium select-none">Incluir {settings.taxName} ({settings.taxRate}%)</label>
-                     </div>
-                 </div>
-                 <div className="space-y-1 text-right pt-2">
-                     <div className="text-sm text-gray-500 flex justify-between"><span>Subtotal:</span> <span>{formatCurrency(newQuote.subtotal || 0)}</span></div>
-                     {taxEnabled && (
-                        <div className="text-sm text-gray-500 flex justify-between"><span>{settings.taxName} ({settings.taxRate}%):</span> <span>{formatCurrency(newQuote.tax || 0)}</span></div>
-                     )}
-                     <div className="text-xl font-bold text-gray-900 flex justify-between pt-2 border-t border-gray-200 mt-2"><span>Total:</span> <span>{formatCurrency(newQuote.total || 0)}</span></div>
-                 </div>
-              </div>
-
-              <div className="grid grid-cols-1">
-                 <label className="block text-sm font-medium text-gray-700 mb-2">Notas Adicionales</label>
-                 <textarea className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900 text-sm h-24 resize-none"
-                    value={newQuote.notes} onChange={e => setNewQuote({...newQuote, notes: e.target.value})}></textarea>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2.5 border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 bg-white">Cancelar</button>
-                <button type="submit" className="px-6 py-2.5 bg-brand-900 text-white rounded-xl hover:bg-brand-800 shadow-lg shadow-brand-900/20 flex items-center gap-2">
-                    <Save size={18} /> Guardar
-                </button>
-              </div>
+                <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 border border-gray-300 rounded-xl hover:bg-gray-50 text-gray-700 bg-white font-medium">Cancelar</button>
+                    <button type="submit" className="px-6 py-2 bg-brand-900 text-white rounded-xl hover:bg-brand-800 font-bold shadow-lg">Guardar</button>
+                </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* CLIENT SELECTION MODAL */}
-      {isClientModalOpen && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200">
-                  <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                      <h3 className="font-bold text-lg text-gray-900">Seleccionar Cliente</h3>
-                      <button onClick={() => setIsClientModalOpen(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
-                  </div>
-                  <div className="p-4 bg-white border-b border-gray-50">
-                      <div className="relative">
-                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                          <input 
-                            autoFocus
-                            type="text" 
-                            placeholder="Buscar cliente..."
-                            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-900/10"
-                            value={clientSearch}
-                            onChange={(e) => setClientSearch(e.target.value)}
-                          />
-                      </div>
-                  </div>
-                  <div className="p-2 overflow-y-auto max-h-[300px]">
-                      {availableClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(client => (
-                          <div key={client.id} onClick={() => handleSelectClient(client)} className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer rounded-lg border-b border-gray-50 last:border-0">
-                              <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-900 flex items-center justify-center text-xs font-bold">{client.name.charAt(0)}</div>
-                              <div>
-                                  <p className="font-medium text-gray-900 text-sm">{client.name}</p>
-                                  <p className="text-xs text-gray-500">{client.company || 'Sin empresa'}</p>
-                              </div>
-                          </div>
-                      ))}
-                      {availableClients.length === 0 && <p className="text-center text-sm text-gray-400 py-4">No hay clientes registrados.</p>}
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* DETAIL Modal (View Only) */}
-      {viewingQuote && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                     <h3 className="font-bold text-lg text-gray-900">Detalle Cotización</h3>
-                     <button onClick={() => setViewingQuote(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-                </div>
-                <div className="p-6">
-                    <div className="flex justify-between items-center mb-6">
-                        <div>
-                            <p className="text-sm text-gray-500">Cliente</p>
-                            <h4 className="font-bold text-gray-900 text-lg">{viewingQuote.clientName}</h4>
-                        </div>
-                        <div className="text-right">
-                            <p className="text-sm text-gray-500">Monto Total</p>
-                            <h4 className="font-bold text-brand-900 text-xl">{formatCurrency(viewingQuote.total)}</h4>
-                        </div>
-                    </div>
-                    <div className="bg-gray-50 rounded-xl p-4 mb-6">
-                         <h5 className="text-xs font-bold text-gray-500 uppercase mb-3">Ítems</h5>
-                         <ul className="space-y-2">
-                             {viewingQuote.items.map(i => (
-                                 <li key={i.id} className="flex justify-between text-sm">
-                                     <span className="text-gray-700">{i.quantity} x {i.description}</span>
-                                     <span className="font-medium text-gray-900">{formatCurrency(i.total)}</span>
-                                 </li>
-                             ))}
-                         </ul>
-                    </div>
-                    <div className="flex flex-col gap-3">
-                         <button onClick={() => openEdit(viewingQuote)} className="w-full flex justify-center items-center gap-2 py-2.5 border border-gray-200 rounded-xl text-gray-700 font-medium hover:bg-gray-50 transition-colors">
-                             <Edit3 size={18} /> Editar Cotización
-                         </button>
-                         <button onClick={() => handleShareWhatsApp(viewingQuote)} className="w-full flex justify-center items-center gap-2 py-2.5 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors">
-                             <MessageCircle size={18} /> Enviar WhatsApp
-                         </button>
-                         <button onClick={() => preparePDFDownload(viewingQuote)} className="w-full flex justify-center items-center gap-2 py-2.5 bg-gray-900 text-white rounded-xl font-medium hover:bg-gray-800 transition-colors">
-                             <Download size={18} /> Descargar PDF
-                         </button>
-                    </div>
-                </div>
-            </div>
-          </div>
-      )}
-
-      {/* PDF TEMPLATE */}
+      {/* PDF Generation View */}
       {pdfPreview && (
-         <div className="fixed top-0 left-0 w-full h-0 overflow-hidden">
-            <div ref={printRef} className="w-[210mm] min-h-[297mm] bg-white text-slate-800 relative font-sans">
-                {/* DARK HEADER */}
-                <div className="bg-[#1e293b] text-white p-12 flex justify-between items-center" style={{ backgroundColor: settings.primaryColor }}>
-                    <div className="flex items-center gap-4">
+         <div className="fixed top-0 left-[-9999px]">
+            <div ref={printRef} className="w-[210mm] min-h-[297mm] bg-white text-slate-800 relative font-sans leading-normal">
+                {/* PDF HEADER */}
+                <div className="p-10 flex justify-between items-center" style={{ backgroundColor: settings.pdfHeaderColor || settings.primaryColor || '#162836' }}>
+                    <div className="flex items-center">
                          {settings.logoUrl ? (
-                             <img src={settings.logoUrl} className="h-16 object-contain bg-white rounded-lg p-1" />
-                         ) : <div className="h-12 w-12 bg-white rounded-full"></div>}
-                         <div>
-                             <h1 className="text-2xl font-bold tracking-widest uppercase">Bráma</h1>
-                             <p className="text-xs tracking-[0.3em] uppercase opacity-80">Estudio Creativo</p>
-                         </div>
+                             <img src={settings.logoUrl} style={{ maxHeight: '80px', width: 'auto' }} alt="Logo" />
+                         ) : (
+                             <h1 className="text-4xl font-bold text-white tracking-widest uppercase">{settings.companyName}</h1>
+                         )}
                     </div>
-                    <div className="text-right">
-                        <h2 className="text-4xl font-bold tracking-tight mb-2">COTIZACIÓN</h2>
-                        <div className="text-xs opacity-80 space-y-1">
-                            <div className="flex justify-between gap-8"><span>NRO:</span> <span className="font-mono">{pdfPreview.id.replace('COT-', '')}</span></div>
-                            <div className="flex justify-between gap-8"><span>EMISIÓN:</span> <span>{pdfPreview.date}</span></div>
-                            <div className="flex justify-between gap-8"><span>VÁLIDO HASTA:</span> <span>{pdfPreview.validUntil}</span></div>
+                    <div className="text-right text-white">
+                        <h2 className="text-5xl font-bold tracking-tight mb-2 opacity-90 leading-none">COTIZACIÓN</h2>
+                        <div className="text-xs font-bold opacity-80 space-y-1 uppercase tracking-wide flex flex-col items-end">
+                            <div className="flex justify-end gap-6 border-b border-white/20 pb-1 mb-1 w-full"><span className="opacity-70 text-right w-24">NRO</span> <span className="font-mono text-sm w-32">{pdfPreview.id.replace('COT-', '')}</span></div>
+                            <div className="flex justify-end gap-6"><span className="opacity-70 text-right w-24">EMISIÓN</span> <span className="w-32 whitespace-nowrap">{new Date(pdfPreview.date).toLocaleDateString()} {new Date().toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit', hour12: true})}</span></div>
+                            <div className="flex justify-end gap-6"><span className="opacity-70 text-right w-24">VÁLIDO</span> <span className="w-32">{new Date(pdfPreview.validUntil).toLocaleDateString()}</span></div>
                         </div>
                     </div>
                 </div>
 
-                <div className="p-12">
-                    {/* INFO GRID */}
-                    <div className="flex justify-between mb-16 text-sm">
-                        <div className="w-1/2">
-                            <p className="font-bold text-gray-900 mb-2">Cotización a:</p>
-                            <h3 className="text-lg font-bold text-gray-800 mb-1">{pdfPreview.clientName}</h3>
-                            <p className="text-gray-500">Calle Sin Nombre #123</p>
-                            <p className="text-gray-500">Santa Cruz, Bolivia</p>
+                <div className="px-12 pt-12">
+                    {/* INFO ROW */}
+                    <div className="flex justify-between mb-8 text-sm border-b border-gray-100 pb-8">
+                        <div className="w-[45%]">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">Cotizado a:</p>
+                            <h3 className="text-xl font-bold text-gray-900 mb-1 leading-tight">{pdfPreview.clientName}</h3>
+                            {(() => {
+                                const client = getClientDetails(pdfPreview.clientName);
+                                return (
+                                    <div className="text-gray-500 text-xs mt-1 space-y-0.5">
+                                        {client?.company && <div className="font-medium text-gray-600">{client.company}</div>}
+                                        {client?.phone && <div>{client.phone}</div>}
+                                        {pdfPreview.clientEmail && <div>{pdfPreview.clientEmail}</div>}
+                                    </div>
+                                );
+                            })()}
                         </div>
-                        <div className="w-1/2 text-right">
-                            <h3 className="font-bold text-gray-900 mb-1">{settings.companyName}</h3>
-                            <p className="text-gray-500 whitespace-pre-line">{settings.address}</p>
-                            <p className="text-gray-500">{settings.phone}</p>
-                            <p className="text-gray-500">{settings.website}</p>
+                        <div className="w-[45%] text-right">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">De:</p>
+                            <div className="text-gray-600 text-xs leading-relaxed whitespace-pre-wrap font-medium">
+                                {settings.pdfSenderInfo || `${settings.companyName}\n${settings.address}\n${settings.phone}`}
+                            </div>
                         </div>
                     </div>
 
                     {/* TABLE */}
-                    <div className="mb-12">
-                        <div className="bg-[#1e293b] text-white flex px-6 py-3 text-sm font-bold uppercase tracking-wider rounded-t-sm" style={{ backgroundColor: settings.primaryColor }}>
+                    <div className="mb-10">
+                        <div className="bg-gray-50 flex px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-500 rounded-md mb-2">
                             <div className="flex-1">Descripción</div>
-                            <div className="w-24 text-center">Cantidad</div>
-                            <div className="w-32 text-right">Precio</div>
-                            <div className="w-32 text-right">Total</div>
+                            <div className="w-20 text-center">Cant.</div>
+                            <div className="w-28 text-right">P. Unit</div>
+                            <div className="w-28 text-right">Total</div>
                         </div>
-                        <div className="divide-y divide-gray-100 border-x border-b border-gray-100">
+                        <div className="divide-y divide-gray-100">
                             {pdfPreview.items.map((item, idx) => (
-                                <div key={idx} className={`flex px-6 py-4 text-sm ${idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}`}>
-                                    <div className="flex-1 font-medium text-gray-800">{item.description}</div>
-                                    <div className="w-24 text-center text-gray-600">{item.quantity}</div>
-                                    <div className="w-32 text-right text-gray-600">{formatCurrency(item.unitPrice)}</div>
-                                    <div className="w-32 text-right font-bold text-gray-900">{formatCurrency(item.total)}</div>
+                                <div key={idx} className="flex px-4 py-3 text-sm items-center">
+                                    <div className="flex-1 font-medium text-gray-800 leading-snug">{item.description}</div>
+                                    <div className="w-20 text-center text-gray-500">{item.quantity}</div>
+                                    <div className="w-28 text-right text-gray-500">{formatCurrency(item.unitPrice, settings)}</div>
+                                    <div className="w-28 text-right font-bold text-gray-900">{formatCurrency(item.total, settings)}</div>
                                 </div>
                             ))}
                         </div>
+                        <div className="border-t border-gray-200 mt-2"></div>
                     </div>
 
-                    {/* TOTALS & PAYMENT INFO */}
-                    <div className="flex justify-between items-start mb-20">
-                        <div className="w-1/2 pr-12">
-                            <h4 className="font-bold text-gray-900 mb-2 text-sm">Método de pago</h4>
-                            <div className="text-xs text-gray-500 whitespace-pre-line leading-relaxed mb-4">
-                                {settings.paymentInfo || 'Efectivo / Transferencia'}
+                    {/* FOOTER SECTION: Totals, Terms, Signature */}
+                    <div className="flex justify-between items-start">
+                        <div className="w-[55%] pr-8">
+                            <div className="mb-6">
+                                <h4 className="font-bold text-gray-900 mb-3 text-[11px] uppercase tracking-wide">Métodos de Pago</h4>
+                                <div className="flex gap-5 items-start">
+                                    {settings.qrCodeUrl && (
+                                        <div className="flex-shrink-0">
+                                            <img src={settings.qrCodeUrl} className="h-24 w-24 object-contain mix-blend-multiply" alt="QR" />
+                                        </div>
+                                    )}
+                                    <div className="flex-1 text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">
+                                        {settings.paymentInfo || 'Sin información bancaria configurada.'}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <h4 className="font-bold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">Términos y Condiciones</h4>
+                                <div className="text-[10px] text-gray-500 leading-relaxed whitespace-pre-wrap">
+                                    {settings.termsAndConditions || 'Sin términos definidos.'}
+                                </div>
                             </div>
                         </div>
-                        <div className="w-1/2 pl-12">
-                             <div className="flex justify-between py-2 text-sm text-gray-600 font-bold mb-2">
-                                 <span>SUB TOTAL</span>
-                                 <span>{formatCurrency(pdfPreview.subtotal)}</span>
-                             </div>
-                             {pdfPreview.tax > 0 && (
-                                <div className="flex justify-between py-2 text-sm text-gray-600 font-bold mb-2">
-                                    <span>{settings.taxName} ({settings.taxRate}%)</span>
-                                    <span>{formatCurrency(pdfPreview.tax)}</span>
-                                </div>
-                             )}
-                             <div className="flex justify-between py-3 text-xl font-bold text-gray-900 border-b-2 border-gray-900" style={{ borderColor: settings.primaryColor }}>
-                                 <span>TOTAL</span>
-                                 <span>{formatCurrency(pdfPreview.total)}</span>
-                             </div>
-                        </div>
-                    </div>
 
-                    {/* FOOTER & SIGNATURE */}
-                    <div className="flex justify-between items-end mt-auto">
-                        <div className="w-2/3">
-                            <h4 className="font-bold text-gray-900 mb-2 text-sm">Términos y condiciones</h4>
-                            <p className="text-xs text-gray-500 leading-relaxed max-w-sm">
-                                {settings.termsAndConditions || 'Para iniciar cualquier proyecto se requiere anticipo.'}
-                            </p>
-                            <p className="text-xs font-bold text-gray-900 mt-6 uppercase tracking-widest">¡MUCHAS GRACIAS!</p>
-                        </div>
-                        <div className="text-center">
-                            <div className="h-16 w-40 border-b border-gray-400 mb-2 mx-auto"></div>
-                            <p className="text-xs font-bold text-gray-900">Ariel Espinoza Heredia</p>
-                            <p className="text-[10px] font-bold text-gray-500 uppercase">CEO PROPIETARIO</p>
+                        <div className="w-[40%] flex flex-col items-end">
+                            <div className="w-full bg-gray-50 p-5 rounded-lg space-y-2 border border-gray-100 mb-8">
+                                <div className="flex justify-between text-sm text-gray-600 font-medium"><span>Subtotal</span><span>{formatCurrency(pdfPreview.subtotal, settings)}</span></div>
+                                {pdfPreview.tax > 0 && (<div className="flex justify-between text-sm text-gray-600 font-medium"><span>{settings.taxName} ({settings.taxRate}%)</span><span>{formatCurrency(pdfPreview.tax, settings)}</span></div>)}
+                                <div className="flex justify-between text-xl font-bold text-gray-900 border-t border-gray-200 pt-3 mt-1"><span>TOTAL</span><span>{formatCurrency(pdfPreview.total, settings)}</span></div>
+                            </div>
+
+                            <div className="text-center mt-4 w-full flex flex-col items-center">
+                                {settings.signatureUrl && (<img src={settings.signatureUrl} className="h-20 mb-[-15px] object-contain relative z-10" alt="Firma" />)}
+                                <div className="relative pt-2 px-8 border-t border-gray-400 min-w-[200px]">
+                                    <p className="text-sm font-bold text-gray-900">{settings.signatureName}</p>
+                                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{settings.signatureTitle}</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    
-                    <div className="mt-8 text-center border-t border-gray-100 pt-4">
-                         <p className="text-xs text-gray-400 tracking-widest">{settings.website}</p>
+                </div>
+
+                <div className="absolute bottom-0 left-0 w-full">
+                    <div className="bg-gray-100 text-center py-3 border-t border-gray-200">
+                        <p className="text-[10px] text-gray-500 tracking-wider font-medium uppercase">{settings.pdfFooterText || `${settings.website} • ${settings.address}`}</p>
                     </div>
                 </div>
             </div>
          </div>
+      )}
+      
+      {/* Restored Client Modal for Search in Edit */}
+      {isClientModalOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl w-full max-w-md h-[450px] flex flex-col shadow-2xl relative overflow-hidden">
+                  <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                      <h3 className="font-bold text-gray-900">{clientSearchMode ? 'Buscar Cliente' : 'Nuevo Cliente Rápido'}</h3>
+                      <button onClick={() => setIsClientModalOpen(false)} className="p-1 hover:bg-gray-200 rounded-full"><X size={20} className="text-gray-500"/></button>
+                  </div>
+                  
+                  {clientSearchMode ? (
+                      <div className="flex flex-col h-full">
+                          <div className="p-4 border-b border-gray-100 flex gap-2">
+                              <div className="relative flex-1">
+                                  <Search className="absolute left-3 top-2.5 text-gray-400" size={18}/>
+                                  <input autoFocus type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand-500" onChange={(e) => setCatalogSearch(e.target.value)} />
+                              </div>
+                              <button onClick={() => setClientSearchMode(false)} className="px-3 bg-brand-900 text-white rounded-xl text-sm font-bold hover:bg-brand-800 flex items-center gap-1"><Plus size={16}/> Nuevo</button>
+                          </div>
+                          <div className="p-4 flex-1 overflow-y-auto">
+                              {isLoadingData && availableClients.length === 0 && (
+                                   <div className="flex justify-center py-8"><RefreshCw className="animate-spin text-brand-900" /></div>
+                              )}
+                              {filteredClients.map(c => (
+                                  <div key={c.id} onClick={() => handleSelectClient(c)} className="p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer rounded-lg">
+                                      <span className="font-bold text-gray-900">{c.name}</span> <span className="text-xs text-gray-500 block">{c.company}</span>
+                                  </div>
+                              ))}
+                              {!isLoadingData && availableClients.length === 0 && (
+                                  <p className="text-center text-gray-400 py-8 text-sm">No se encontraron clientes.</p>
+                              )}
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="p-6 flex flex-col h-full">
+                          <label className="block text-sm font-bold text-gray-700 mb-2">Nombre del Cliente</label>
+                          <input autoFocus type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl mb-4 bg-white text-gray-900 outline-none focus:border-brand-500" value={newClientName} onChange={e => setNewClientName(e.target.value)} placeholder="Ej. Juan Perez" />
+                          <div className="mt-auto flex gap-3">
+                              <button onClick={() => setClientSearchMode(true)} className="flex-1 py-2 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50">Cancelar</button>
+                              <button onClick={handleQuickCreateClient} className="flex-1 py-2 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800">Crear y Usar</button>
+                          </div>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
+
+      {/* Restored Catalog Modal */}
+      {isCatalogModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl w-full max-w-2xl h-[700px] flex flex-col shadow-2xl animate-in zoom-in duration-200">
+                  <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                      <h3 className="font-bold text-lg text-gray-900">Catálogo de Productos y Servicios</h3>
+                      <button onClick={() => setIsCatalogModalOpen(false)} className="text-gray-500 hover:text-gray-900"><X size={20}/></button>
+                  </div>
+                  
+                  <div className="p-5 bg-white border-b border-gray-100 space-y-4">
+                      <div className="flex gap-4">
+                          <div className="relative flex-1">
+                              <Search className="absolute left-3 top-2.5 text-gray-400" size={18}/>
+                              <input 
+                                autoFocus 
+                                type="text" 
+                                placeholder="Buscar por nombre o código..." 
+                                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:border-brand-900 text-gray-900 bg-white" 
+                                value={catalogSearch} 
+                                onChange={e => setCatalogSearch(e.target.value)}
+                              />
+                          </div>
+                          <select 
+                            className="w-1/3 px-3 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:border-brand-900 text-gray-700 bg-white"
+                            value={catalogCategory}
+                            onChange={(e) => setCatalogCategory(e.target.value)}
+                          >
+                              {categories.map(cat => (
+                                  <option key={cat} value={cat}>{cat === 'All' ? 'Todas las Categorías' : cat}</option>
+                              ))}
+                          </select>
+                      </div>
+
+                      <div className="flex p-1 bg-gray-100 rounded-xl">
+                          <button onClick={() => setCatalogTab('All')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${catalogTab === 'All' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}>Todos</button>
+                          <button onClick={() => setCatalogTab('Service')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${catalogTab === 'Service' ? 'bg-white shadow text-blue-700' : 'text-gray-500 hover:text-blue-700'}`}>Servicios</button>
+                          <button onClick={() => setCatalogTab('Product')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${catalogTab === 'Product' ? 'bg-white shadow text-orange-700' : 'text-gray-500 hover:text-orange-700'}`}>Productos</button>
+                      </div>
+                  </div>
+
+                  <div className="p-5 flex-1 overflow-y-auto bg-gray-50">
+                      {isLoadingData && filteredCatalog.length === 0 && (
+                           <div className="flex justify-center py-8"><RefreshCw className="animate-spin text-brand-900" /></div>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {filteredCatalog.map(item => (
+                              <div key={item.id} onClick={() => addItemFromCatalog(item)} className="bg-white p-4 rounded-xl border border-gray-200 hover:border-brand-500 cursor-pointer shadow-sm hover:shadow-md transition-all group flex flex-col">
+                                  <div className="flex justify-between items-start mb-2">
+                                      <span className="font-bold text-gray-900 text-base group-hover:text-brand-900 line-clamp-1">{item.name}</span>
+                                      <span className="font-bold text-brand-600 bg-brand-50 px-2 py-1 rounded text-sm">{formatCurrency(item.price, settings)}</span>
+                                  </div>
+                                  <p className="text-xs text-gray-500 mb-3 line-clamp-2 h-8">{item.description || 'Sin descripción'}</p>
+                                  <div className="mt-auto flex justify-between items-center border-t border-gray-100 pt-2">
+                                      <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-medium border border-gray-200">{item.category}</span>
+                                      {item.type === 'Product' && (
+                                          <span className={`text-[10px] font-bold ${item.quantity > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                              Stock: {item.quantity}
+                                          </span>
+                                      )}
+                                  </div>
+                              </div>
+                          ))}
+                          {!isLoadingData && filteredCatalog.length === 0 && (
+                              <div className="col-span-full py-12 text-center text-gray-400">
+                                  <Package size={48} className="mx-auto mb-2 opacity-20"/>
+                                  <p>No se encontraron resultados.</p>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+              </div>
+          </div>
       )}
     </div>
   );

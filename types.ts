@@ -1,3 +1,4 @@
+
 export enum Status {
   PLANNED = 'PLANNED',
   IN_PROGRESS = 'IN_PROGRESS',
@@ -24,6 +25,13 @@ export interface Client {
   lastContactDate?: string;
 }
 
+export interface ProjectStage {
+    id: string;
+    name: string;
+    status: 'Pending' | 'In Progress' | 'Completed';
+    date?: string;
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -34,6 +42,8 @@ export interface Project {
   dueDate: string;
   budget: number;
   category: 'Design' | 'Repair' | 'Sublimation' | 'Development';
+  stages: ProjectStage[]; 
+  clientViewToken?: string; 
 }
 
 export interface QuoteItem {
@@ -56,7 +66,7 @@ export interface Quote {
   total: number;
   status: 'Draft' | 'Sent' | 'Approved' | 'Paid' | 'Rejected';
   notes?: string;
-  taxEnabled?: boolean; // New field to persist state
+  taxEnabled?: boolean;
 }
 
 export interface Sale {
@@ -68,8 +78,8 @@ export interface Sale {
   subtotal: number;
   tax: number;
   total: number;
-  amountPaid: number; // For partial payments
-  balance: number; // Remaining amount
+  amountPaid: number;
+  balance: number;
   paymentStatus: 'Pending' | 'Partial' | 'Paid';
   paymentMethod: 'Cash' | 'Transfer' | 'QR' | 'Card';
   notes?: string;
@@ -85,27 +95,43 @@ export interface InventoryItem {
   price: number;
   status: 'In Stock' | 'Low Stock' | 'Critical';
   lastUpdated: string;
-  type?: 'Product' | 'Service'; // Added type for catalog filtering
+  type?: 'Product' | 'Service';
+  description?: string; 
+  stock?: number; 
 }
 
 export interface AppSettings {
-  companyName: string;
+  // Dashboard & System
+  companyName: string; 
+  primaryColor: string;
+  
+  // PDF Specifics
+  logoUrl?: string; 
+  pdfSenderInfo: string; 
+  pdfFooterText: string;
+  pdfHeaderColor?: string; 
+  
+  // Contact info (fallback)
   address: string;
   website: string;
   phone: string;
-  primaryColor: string;
-  logoUrl?: string;
-  qrCodeUrl?: string;
+  
+  // Payment & Signature
   paymentInfo: string;
+  qrCodeUrl?: string; 
   termsAndConditions: string;
   
+  signatureName: string;
+  signatureTitle: string;
+  signatureUrl?: string; 
+
   // Finance Settings
-  currencySymbol: string; // e.g., "Bs", "$", "€"
-  currencyName: string;   // e.g., "Bolivianos"
-  currencyPosition: 'before' | 'after'; // "$ 100" vs "100 €"
-  decimals: number;       // 0 or 2
-  taxRate: number;        // e.g., 13, 16, 21
-  taxName: string;        // e.g., "IVA", "RUT", "IGV", "TAX"
+  currencySymbol: string;
+  currencyName: string;
+  currencyPosition: 'before' | 'after';
+  decimals: number;
+  taxRate: number;
+  taxName: string;
 }
 
 export interface User {
@@ -115,7 +141,8 @@ export interface User {
   role: 'Admin' | 'Sales' | 'Viewer';
   avatar?: string;
   active: boolean;
-  password?: string; // In a real app, this would be hashed
+  password?: string;
+  permissions?: string[]; // New: Granular permissions
 }
 
 export interface Category {

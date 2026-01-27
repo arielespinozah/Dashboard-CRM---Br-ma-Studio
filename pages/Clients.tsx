@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Search, Filter, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, Save } from 'lucide-react';
 import { Client } from '../types';
+import { db } from '../firebase';
+import { doc, setDoc } from 'firebase/firestore';
 
 const initialClients: Client[] = [
   {
@@ -25,8 +27,15 @@ const initialClients: Client[] = [
 ];
 
 export const Clients = () => {
-  const [clients, setClients] = useState<Client[]>(initialClients);
+  // CRITICAL FIX: Lazy State Initialization
+  // This ensures we load from localStorage BEFORE setting the initial state, preventing overwrite.
+  const [clients, setClients] = useState<Client[]>(() => {
+      const saved = localStorage.getItem('crm_clients');
+      return saved ? JSON.parse(saved) : initialClients;
+  });
+
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<'All' | 'Client' | 'Prospect'>('All');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -34,15 +43,18 @@ export const Clients = () => {
     name: '', company: '', email: '', phone: '', address: '', type: 'Prospect', notes: ''
   });
 
-  // Load from LS on mount
-  useEffect(() => {
-      const saved = localStorage.getItem('crm_clients');
-      if (saved) setClients(JSON.parse(saved));
-  }, []);
+  const syncToFirestore = async (updatedClients: Client[]) => {
+      try {
+          await setDoc(doc(db, 'crm_data', 'clients'), { list: updatedClients });
+      } catch (e) {
+          // Silent fail or log
+      }
+  };
 
   // Save to LS whenever clients change
   useEffect(() => {
       localStorage.setItem('crm_clients', JSON.stringify(clients));
+      syncToFirestore(clients);
   }, [clients]);
 
   const handleEdit = (client: Client) => {
@@ -83,6 +95,12 @@ export const Clients = () => {
     setIsModalOpen(false);
   };
 
+  const filteredClients = clients.filter(c => {
+      const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.company.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesTab = activeTab === 'All' ? true : c.type === activeTab;
+      return matchesSearch && matchesTab;
+  });
+
   return (
     <div className="space-y-6 h-full">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -95,13 +113,22 @@ export const Clients = () => {
         </button>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-        <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Buscar clientes..." className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-900/20 focus:border-brand-900 transition-all shadow-sm text-gray-900"/>
+      <div className="flex flex-col md:flex-row gap-4 justify-between items-center">
+          {/* Tabs */}
+          <div className="bg-white p-1 rounded-xl border border-gray-200 flex w-full md:w-auto">
+              <button onClick={() => setActiveTab('All')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'All' ? 'bg-brand-900 text-white shadow' : 'text-gray-500 hover:text-gray-900'}`}>Todos</button>
+              <button onClick={() => setActiveTab('Client')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'Client' ? 'bg-blue-600 text-white shadow' : 'text-gray-500 hover:text-blue-600'}`}>Clientes</button>
+              <button onClick={() => setActiveTab('Prospect')} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'Prospect' ? 'bg-orange-500 text-white shadow' : 'text-gray-500 hover:text-orange-500'}`}>Prospectos</button>
+          </div>
+
+          <div className="relative w-full md:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Buscar..." className="w-full pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-900/20 text-sm text-gray-900"/>
+          </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {clients.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.company.toLowerCase().includes(searchTerm.toLowerCase())).map(client => (
+        {filteredClients.map(client => (
           <div key={client.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-all group relative">
             <div className="flex items-center gap-4 mb-4">
                 <img src={client.avatar || `https://ui-avatars.com/api/?name=${client.name}&background=random`} alt={client.name} className="w-14 h-14 rounded-full object-cover border-2 border-white shadow-sm"/>
@@ -124,6 +151,11 @@ export const Clients = () => {
             </div>
           </div>
         ))}
+        {filteredClients.length === 0 && (
+            <div className="col-span-full text-center py-12 text-gray-400">
+                No se encontraron {activeTab === 'All' ? 'registros' : activeTab === 'Client' ? 'clientes' : 'prospectos'}.
+            </div>
+        )}
       </div>
 
       {isModalOpen && (

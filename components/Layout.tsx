@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './Sidebar';
-import { Menu } from 'lucide-react';
-import { User } from '../types';
+import { Menu, Bell, ChevronDown, User as UserIcon, LogOut, Settings, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import { User, AppSettings } from '../types';
+import { Link, useNavigate } from 'react-router-dom';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -9,8 +10,55 @@ interface LayoutProps {
   onLogout?: () => void;
 }
 
+interface Notification {
+    id: string;
+    title: string;
+    message: string;
+    type: 'info' | 'success' | 'warning';
+    read: boolean;
+    time: string;
+}
+
 export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
-  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const navigate = useNavigate();
+  const notifRef = useRef<HTMLDivElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  // Load basic settings for the welcome message
+  const [settings] = useState<AppSettings>(() => {
+      const s = localStorage.getItem('crm_settings');
+      return s ? JSON.parse(s) : { companyName: 'Bráma Studio' };
+  });
+
+  // Mock Notifications
+  const [notifications, setNotifications] = useState<Notification[]>([
+      { id: '1', title: 'Nuevo Lead', message: 'Juan Perez se ha registrado.', type: 'success', read: false, time: 'Hace 5 min' },
+      { id: '2', title: 'Stock Bajo', message: 'Tinta Negra está por agotarse.', type: 'warning', read: false, time: 'Hace 1 hora' },
+      { id: '3', title: 'Sistema', message: 'Copia de seguridad realizada.', type: 'info', read: true, time: 'Ayer' },
+  ]);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
+              setNotifOpen(false);
+          }
+          if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+              setProfileOpen(false);
+          }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleMarkAsRead = () => {
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
 
   return (
     <div className="flex h-screen bg-[#f4f6f7] overflow-hidden">
@@ -33,16 +81,113 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Mobile Header */}
-        <div className="lg:hidden flex items-center justify-between bg-white border-b border-gray-200 px-4 py-3">
-          <div className="font-bold text-lg text-brand-900">Bráma Studio</div>
-          <button 
-            onClick={() => setMobileMenuOpen(true)}
-            className="p-2 rounded-md text-gray-500 hover:bg-gray-100"
-          >
-            <Menu size={24} />
-          </button>
-        </div>
+        
+        {/* Modern Header */}
+        <header className="bg-white border-b border-gray-200 h-20 px-6 flex items-center justify-between shadow-sm z-10 relative">
+            <div className="flex items-center gap-4">
+                <button 
+                    onClick={() => setMobileMenuOpen(true)}
+                    className="lg:hidden p-2 rounded-xl text-gray-500 hover:bg-gray-100"
+                >
+                    <Menu size={24} />
+                </button>
+                <div>
+                    <h2 className="text-xl font-bold text-gray-900 leading-none">
+                        Bienvenido a {settings.companyName}
+                    </h2>
+                    <p className="text-xs text-gray-500 mt-1">
+                        {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                    </p>
+                </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+                {/* Notifications */}
+                <div className="relative" ref={notifRef}>
+                    <button 
+                        onClick={() => setNotifOpen(!notifOpen)}
+                        className={`relative p-2.5 rounded-xl transition-colors ${notifOpen ? 'bg-gray-100 text-brand-900' : 'text-gray-400 hover:text-brand-900 hover:bg-gray-50'}`}
+                    >
+                        <Bell size={20} />
+                        {unreadCount > 0 && (
+                            <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
+                        )}
+                    </button>
+
+                    {notifOpen && (
+                        <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                                <h3 className="font-bold text-sm text-gray-900">Notificaciones</h3>
+                                {unreadCount > 0 && (
+                                    <button onClick={handleMarkAsRead} className="text-[10px] text-blue-600 hover:underline font-medium">Marcar leídas</button>
+                                )}
+                            </div>
+                            <div className="max-h-80 overflow-y-auto">
+                                {notifications.length > 0 ? notifications.map(n => (
+                                    <div key={n.id} className={`p-3 border-b border-gray-50 hover:bg-gray-50 transition-colors flex gap-3 ${!n.read ? 'bg-blue-50/30' : ''}`}>
+                                        <div className={`mt-1 flex-shrink-0 ${n.type === 'success' ? 'text-green-500' : n.type === 'warning' ? 'text-orange-500' : 'text-blue-500'}`}>
+                                            {n.type === 'success' ? <CheckCircle2 size={16}/> : n.type === 'warning' ? <AlertTriangle size={16}/> : <Info size={16}/>}
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-bold text-gray-800">{n.title}</p>
+                                            <p className="text-xs text-gray-600 leading-snug">{n.message}</p>
+                                            <p className="text-[10px] text-gray-400 mt-1">{n.time}</p>
+                                        </div>
+                                    </div>
+                                )) : (
+                                    <div className="p-8 text-center text-gray-400 text-sm">No tienes notificaciones.</div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Profile */}
+                <div className="relative" ref={profileRef}>
+                    <button 
+                        onClick={() => setProfileOpen(!profileOpen)}
+                        className={`flex items-center gap-3 pl-1 pr-2 py-1 rounded-xl transition-colors border ${profileOpen ? 'bg-gray-50 border-gray-200' : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
+                    >
+                        <div className="w-9 h-9 rounded-full bg-brand-900 text-white flex items-center justify-center font-bold text-sm shadow-md shadow-brand-900/20">
+                            {user?.name.charAt(0)}
+                        </div>
+                        <div className="hidden md:block text-left">
+                            <p className="text-sm font-bold text-gray-900 leading-none">{user?.name}</p>
+                            <p className="text-[10px] text-gray-500 font-medium capitalize mt-0.5">{user?.role === 'Sales' ? 'Vendedor' : user?.role}</p>
+                        </div>
+                        <ChevronDown size={16} className={`text-gray-400 hidden md:block transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {/* Profile Dropdown */}
+                    {profileOpen && (
+                        <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="p-4 border-b border-gray-50 bg-gray-50/50">
+                                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Conectado como</p>
+                                <p className="text-sm font-medium text-gray-900 truncate">{user?.email}</p>
+                            </div>
+                            <div className="p-2 space-y-1">
+                                <button onClick={() => { navigate('/settings?tab=profile'); setProfileOpen(false); }} className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg flex items-center gap-2 transition-colors">
+                                    <UserIcon size={16} className="text-gray-400" /> Mi Perfil
+                                </button>
+                                {user?.role === 'Admin' && (
+                                    <button onClick={() => { navigate('/settings?tab=general'); setProfileOpen(false); }} className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg flex items-center gap-2 transition-colors">
+                                        <Settings size={16} className="text-gray-400" /> Configuración Global
+                                    </button>
+                                )}
+                            </div>
+                            <div className="p-2 border-t border-gray-50">
+                                <button 
+                                    onClick={onLogout}
+                                    className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-2 transition-colors font-medium"
+                                >
+                                    <LogOut size={16} /> Cerrar Sesión
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </header>
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           {children}

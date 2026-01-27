@@ -13,35 +13,67 @@ import { Sales } from './pages/Sales';
 import { Inventory } from './pages/Inventory';
 import { Login } from './pages/Login';
 import { User } from './types';
+import { auth } from './firebase';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
-// Auth Guard - Defined outside App to avoid recreation on each render and fix TS type inference issues
+// Auth Guard
 interface ProtectedRouteProps {
   user: User | null;
-  children: React.ReactNode;
+  children?: React.ReactNode;
   roles?: string[];
 }
 
 const ProtectedRoute = ({ user, children, roles }: ProtectedRouteProps) => {
     if (!user) return <Navigate to="/login" replace />;
     if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+    // Fix: Ensure children are rendered if passed, otherwise Outlet (though here we wrap specific components)
     return <>{children}</>;
 };
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  // Load user from session
+  // Initialize App
   useEffect(() => {
-    const storedUser = localStorage.getItem('crm_active_user');
-    if (storedUser) {
-        setUser(JSON.parse(storedUser));
-    }
-    setLoading(false);
+    const init = async () => {
+        // 1. Restore Local Session
+        const storedUser = localStorage.getItem('crm_active_user');
+        if (storedUser) {
+            setUser(JSON.parse(storedUser));
+        }
+
+        // 2. Firebase Auth Handshake
+        // We use onAuthStateChanged to react to auth state, but we trigger signInAnonymously explicitly if needed
+        const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+            if (firebaseUser) {
+                // Connection established silent
+                setAuthError(null);
+            } else {
+                // Not authenticated yet
+            }
+        });
+
+        // Attempt login if not already logged in firebase
+        if (!auth.currentUser) {
+            try {
+                await signInAnonymously(auth);
+            } catch (error: any) {
+                if (error.code === 'auth/admin-restricted-operation') {
+                    setAuthError("Modo Local (Nube desconectada)");
+                }
+            }
+        }
+
+        setLoading(false);
+        return () => unsubscribe();
+    };
+    init();
   }, []);
 
   const handleLogin = (email: string) => {
-      // 1. Try to find in localStorage custom users
+      // Local Login Logic
       const savedUsers = localStorage.getItem('crm_users');
       let foundUser: User | undefined;
       
@@ -50,7 +82,7 @@ function App() {
           foundUser = parsedUsers.find(u => u.email === email);
       }
 
-      // 2. Fallback to hardcoded mock users if not found in custom list (for demo purposes)
+      // Default Users Fallback
       if (!foundUser) {
           if (email === 'admin@brama.com.bo') {
               foundUser = { id: '1', name: 'Admin Principal', email, role: 'Admin', active: true };
@@ -62,15 +94,18 @@ function App() {
       if (foundUser) {
           setUser(foundUser);
           localStorage.setItem('crm_active_user', JSON.stringify(foundUser));
+          // Retry Firebase Auth on login just in case
+          signInAnonymously(auth).catch(() => {});
       }
   };
 
   const handleLogout = () => {
       setUser(null);
       localStorage.removeItem('crm_active_user');
+      auth.signOut();
   };
 
-  if (loading) return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 text-brand-900">Cargando Bráma Studio...</div>;
+  if (loading) return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 text-brand-900 font-medium animate-pulse">Iniciando Sistema...</div>;
 
   return (
     <Router>

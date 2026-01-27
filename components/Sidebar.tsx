@@ -9,7 +9,6 @@ import {
   MessageSquare, 
   BarChart2, 
   Settings,
-  LogOut,
   Printer,
   PenTool,
   ShoppingBag,
@@ -46,33 +45,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ onCloseMobile, user, onLogout 
 
   return (
     <div className="flex flex-col h-full bg-white border-r border-gray-200">
-      <div className="flex items-center h-24 px-6 border-b border-gray-100">
+      <div className="flex items-center h-20 px-6 border-b border-gray-100">
         <div className="flex items-center gap-3">
-           <div className="w-10 h-10 bg-brand-900 rounded-xl flex items-center justify-center text-white shadow-lg shadow-brand-900/20 flex-shrink-0">
-             <PenTool size={20} />
+           <div className="w-9 h-9 bg-brand-900 rounded-xl flex items-center justify-center text-white shadow-lg shadow-brand-900/20 flex-shrink-0">
+             <PenTool size={18} />
            </div>
            <div>
-             <span className="text-xl font-bold text-brand-900 tracking-tight block leading-none">Bráma</span>
-             <span className="text-[10px] text-gray-500 uppercase tracking-[0.2em] font-bold">Studio</span>
+             <span className="text-lg font-bold text-brand-900 tracking-tight block leading-none">Bráma</span>
+             <span className="text-[9px] text-gray-500 uppercase tracking-[0.2em] font-bold">Studio</span>
            </div>
         </div>
       </div>
 
       <div className="flex-1 flex flex-col overflow-y-auto py-6">
-        {user && (
-            <div className="px-6 mb-6">
-                <div className="flex items-center gap-3 p-3 bg-brand-50 rounded-xl border border-gray-100">
-                    <div className="w-10 h-10 rounded-full bg-brand-900 text-white flex items-center justify-center font-bold text-sm">
-                        {user.name.charAt(0)}
-                    </div>
-                    <div className="overflow-hidden">
-                        <p className="text-sm font-bold text-brand-900 truncate">{user.name}</p>
-                        <p className="text-xs text-gray-500 truncate capitalize">{user.role === 'Sales' ? 'Vendedor' : user.role}</p>
-                    </div>
-                </div>
-            </div>
-        )}
-
         <nav className="flex-1 px-4 space-y-1.5">
           {navItems.map((item) => (
             <Link
@@ -95,7 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onCloseMobile, user, onLogout 
           ))}
         </nav>
 
-        <div className="px-4 mt-8">
+        <div className="px-4 mt-8 mb-4">
           <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4">
              <div className="flex items-center gap-3 mb-3">
                 <div className="relative">
@@ -112,16 +97,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onCloseMobile, user, onLogout 
              </div>
           </div>
         </div>
-      </div>
-
-      <div className="p-4 border-t border-gray-100">
-        <button 
-          onClick={onLogout}
-          className="flex items-center justify-center w-full px-4 py-3 text-sm font-medium text-red-600 bg-red-50 rounded-xl hover:bg-red-100 transition-colors"
-        >
-          <LogOut className="mr-2 h-5 w-5" />
-          Cerrar Sesión
-        </button>
       </div>
     </div>
   );
