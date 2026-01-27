@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Upload, Building, Palette, FileText, CreditCard, Users, Shield, Trash2, Plus, Check, DollarSign, Percent, Globe, Database } from 'lucide-react';
 import { AppSettings, User } from '../types';
-import { app } from '../firebase'; // Import firebase app to check connection
+import { app } from '../firebase'; 
+import { getFirestore, doc, setDoc } from 'firebase/firestore';
 
 const defaultSettings: AppSettings = {
     companyName: 'Bráma Studio',
@@ -30,6 +31,7 @@ export const Settings = () => {
     const [activeTab, setActiveTab] = useState('company');
     const [newUser, setNewUser] = useState({ name: '', email: '', role: 'Sales' });
     const [firebaseStatus, setFirebaseStatus] = useState<'Checking' | 'Connected' | 'Error'>('Checking');
+    const [showToast, setShowToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
     // Load from localStorage on mount
     useEffect(() => {
@@ -39,7 +41,6 @@ export const Settings = () => {
         const savedUsers = localStorage.getItem('crm_users');
         if (savedUsers) setUsers(JSON.parse(savedUsers));
 
-        // Check Firebase
         try {
             if (app) {
                 setFirebaseStatus('Connected');
@@ -51,16 +52,39 @@ export const Settings = () => {
         }
     }, []);
 
+    // Clear Toast
+    useEffect(() => {
+        if (showToast) {
+            const timer = setTimeout(() => setShowToast(null), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [showToast]);
+
     const handleChange = (field: keyof AppSettings, value: any) => {
         setSettings(prev => ({ ...prev, [field]: value }));
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
+        // 1. Save to LocalStorage
         localStorage.setItem('crm_settings', JSON.stringify(settings));
         localStorage.setItem('crm_users', JSON.stringify(users));
-        // Force a reload of settings in other tabs/components event dispatch could be better but this is simple
-        window.dispatchEvent(new Event('storage'));
-        alert('Configuración guardada exitosamente.');
+        window.dispatchEvent(new Event('storage')); // Notify other tabs
+
+        // 2. Try Save to Firebase
+        let firebaseMsg = '';
+        try {
+            const db = getFirestore(app);
+            // Write settings to 'crm_data/settings'
+            await setDoc(doc(db, 'crm_data', 'settings'), settings);
+            // Write users to 'crm_data/users' (simplified list)
+            await setDoc(doc(db, 'crm_data', 'users'), { list: users });
+            firebaseMsg = ' y Sincronizado';
+        } catch (e) {
+            console.error("Firebase write error:", e);
+            firebaseMsg = ' (Error Nube: Permisos/Conexión)';
+        }
+
+        setShowToast({ message: `Configuración Guardada${firebaseMsg}`, type: 'success' });
     };
 
     const handleImageUpload = (field: 'logoUrl' | 'qrCodeUrl', e: React.ChangeEvent<HTMLInputElement>) => {
@@ -85,22 +109,32 @@ export const Settings = () => {
         };
         const updatedUsers = [...users, user];
         setUsers(updatedUsers);
-        // Save immediately to ensure login works
-        localStorage.setItem('crm_users', JSON.stringify(updatedUsers));
         setNewUser({ name: '', email: '', role: 'Sales' });
-        alert(`Usuario ${newUser.email} creado. Contraseña por defecto para demo: 123456`);
     };
 
     const handleDeleteUser = (id: string) => {
         if (confirm('¿Eliminar usuario?')) {
             const updatedUsers = users.filter(u => u.id !== id);
             setUsers(updatedUsers);
-            localStorage.setItem('crm_users', JSON.stringify(updatedUsers));
         }
     };
 
     return (
-        <div className="max-w-5xl mx-auto space-y-6 pb-12">
+        <div className="max-w-5xl mx-auto space-y-6 pb-12 relative">
+            
+            {/* Toast Notification */}
+            {showToast && (
+                <div className="fixed bottom-8 right-8 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
+                    <div className="bg-brand-900 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3">
+                        <div className="bg-green-500 rounded-full p-1"><Check size={16} className="text-white"/></div>
+                        <div>
+                            <h4 className="font-bold text-sm">Éxito</h4>
+                            <p className="text-xs opacity-90">{showToast.message}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Ajustes del Sistema</h1>
@@ -151,8 +185,10 @@ export const Settings = () => {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Dirección Completa</label>
-                                    <input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none text-gray-900 bg-white" 
+                                    <textarea className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none text-gray-900 bg-white h-24 resize-none" 
+                                        placeholder="Ej. Av. Principal #123 (enter para nueva linea)"
                                         value={settings.address} onChange={(e) => handleChange('address', e.target.value)} />
+                                    <p className="text-xs text-gray-400 mt-1">Usa 'Enter' para crear múltiples líneas en el PDF.</p>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
@@ -415,7 +451,7 @@ export const Settings = () => {
                             </div>
                             
                             <p className="text-xs text-gray-400 mt-2">
-                                Nota: Si el estado es "Error", verifica tu archivo <code>firebase.ts</code> y las credenciales en el archivo <code>metadata.json</code> o tu configuración de entorno.
+                                Nota: Si el estado es "Error", verifica tu archivo <code>firebase.ts</code> y las credenciales.
                             </p>
                         </div>
                     )}

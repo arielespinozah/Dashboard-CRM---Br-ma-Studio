@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ShoppingBag, Search, Filter, Download, MessageCircle, Plus, Trash2, X, Eye, Save, DollarSign, Package, Briefcase } from 'lucide-react';
-import { Sale, QuoteItem, AppSettings, Category, InventoryItem } from '../types';
+import { ShoppingBag, Search, Filter, Download, MessageCircle, Plus, Trash2, X, Eye, Save, DollarSign, Package, Briefcase, User as UserIcon, Check } from 'lucide-react';
+import { Sale, QuoteItem, AppSettings, Category, InventoryItem, Client } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
-// Mock Catalog Data (Ideally shared context or localStorage)
+// Mock Catalog Data
 const initialCatalog: InventoryItem[] = [
     { id: '1', name: 'Diseño de Logo Pro', price: 1500, category: 'Diseño', sku: 'SRV-001', quantity: 999, minStock: 0, status: 'In Stock', lastUpdated: '', type: 'Service' },
     { id: '2', name: 'Mantenimiento PC', price: 250, category: 'Soporte', sku: 'SRV-002', quantity: 999, minStock: 0, status: 'In Stock', lastUpdated: '', type: 'Service' },
@@ -56,6 +56,11 @@ export const Sales = () => {
   const [pdfPreview, setPdfPreview] = useState<Sale | null>(null);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   
+  // Clients Logic
+  const [availableClients, setAvailableClients] = useState<Client[]>([]);
+  const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
+
   // Catalog State
   const [catalogItems, setCatalogItems] = useState<InventoryItem[]>(initialCatalog);
   const [catalogTab, setCatalogTab] = useState<'Service' | 'Product'>('Service');
@@ -64,6 +69,7 @@ export const Sales = () => {
   // Sale Form State
   const [newSale, setNewSale] = useState<Partial<Sale>>({
       clientName: '',
+      clientId: '',
       date: new Date().toISOString().split('T')[0],
       paymentStatus: 'Pending',
       paymentMethod: 'Cash',
@@ -80,6 +86,9 @@ export const Sales = () => {
   useEffect(() => {
       const saved = localStorage.getItem('crm_settings');
       if (saved) setSettings(JSON.parse(saved));
+      
+      const savedClients = localStorage.getItem('crm_clients');
+      if (savedClients) setAvailableClients(JSON.parse(savedClients));
   }, []);
 
   const formatCurrency = (amount: number) => {
@@ -137,6 +146,11 @@ export const Sales = () => {
       setNewSale(prev => ({ ...prev, items: updatedItems }));
   };
 
+  const handleSelectClient = (client: Client) => {
+      setNewSale(prev => ({ ...prev, clientName: client.name, clientId: client.id }));
+      setIsClientModalOpen(false);
+  };
+
   const handleSave = (e: React.FormEvent) => {
       e.preventDefault();
       const total = newSale.total || 0;
@@ -152,9 +166,8 @@ export const Sales = () => {
       const sale: Sale = {
           ...(newSale as Sale),
           id: saleId,
-          clientId: 'temp', 
           balance: balance,
-          paymentStatus: status
+          paymentStatus: status,
       };
 
       setSales([sale, ...sales]);
@@ -163,6 +176,7 @@ export const Sales = () => {
 
   const preparePDFDownload = (sale: Sale) => {
       setPdfPreview(sale);
+      // Wait for render
       setTimeout(() => {
           if (printRef.current) {
               html2canvas(printRef.current, { scale: 2, useCORS: true }).then(canvas => {
@@ -264,8 +278,13 @@ export const Sales = () => {
                  <div className="grid grid-cols-2 gap-6">
                      <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
-                        <input required type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900 outline-none" 
-                            value={newSale.clientName} onChange={e => setNewSale({...newSale, clientName: e.target.value})} />
+                        <div className="flex gap-2">
+                            <input required type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900 outline-none" 
+                                value={newSale.clientName} onChange={e => setNewSale({...newSale, clientName: e.target.value})} placeholder="Nombre del cliente" />
+                            <button type="button" onClick={() => setIsClientModalOpen(true)} className="px-3 py-2 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200" title="Buscar Cliente">
+                                <Search size={20} />
+                            </button>
+                        </div>
                      </div>
                      <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
@@ -274,31 +293,53 @@ export const Sales = () => {
                      </div>
                  </div>
 
-                 {/* Items */}
-                 <div>
-                     <div className="flex justify-between items-center mb-3">
-                        <label className="text-sm font-medium text-gray-700">Ítems</label>
+                 {/* Items Section with Clear Headers */}
+                 <div className="bg-gray-50/50 rounded-xl p-4 border border-gray-100">
+                     <div className="flex justify-between items-center mb-4">
+                        <label className="text-sm font-bold text-gray-800">Detalle de Ítems</label>
                         <div className="flex gap-2">
-                            <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-sm bg-brand-50 text-brand-900 px-3 py-1.5 rounded-lg hover:bg-brand-100 font-medium flex items-center gap-1 transition-colors">
-                                <Package size={16}/> Catálogo
+                            <button type="button" onClick={() => setIsCatalogOpen(true)} className="text-xs bg-brand-100 text-brand-900 px-3 py-2 rounded-lg hover:bg-brand-200 font-bold flex items-center gap-1 transition-colors">
+                                <Package size={14}/> Catálogo
                             </button>
-                            <button type="button" onClick={addManualItem} className="text-sm bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-200 font-medium flex items-center gap-1 transition-colors">
-                                <Plus size={16}/> Manual
+                            <button type="button" onClick={addManualItem} className="text-xs bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-50 font-bold flex items-center gap-1 transition-colors">
+                                <Plus size={14}/> Manual
                             </button>
                         </div>
                      </div>
-                     <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                         {newSale.items?.length === 0 && <p className="text-sm text-gray-400 text-center py-4">Agrega productos o servicios</p>}
+
+                     {/* HEADERS */}
+                     <div className="grid grid-cols-12 gap-2 mb-2 px-2">
+                        <div className="col-span-5 text-xs font-bold text-gray-400 uppercase tracking-wider">Descripción</div>
+                        <div className="col-span-2 text-xs font-bold text-gray-400 uppercase tracking-wider text-center">Cant.</div>
+                        <div className="col-span-2 text-xs font-bold text-gray-400 uppercase tracking-wider text-right">P. Unit.</div>
+                        <div className="col-span-2 text-xs font-bold text-gray-400 uppercase tracking-wider text-right">Total</div>
+                        <div className="col-span-1"></div>
+                     </div>
+
+                     <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                         {newSale.items?.length === 0 && <p className="text-sm text-gray-400 text-center py-4 italic">No hay ítems agregados. Usa los botones superiores.</p>}
                          {newSale.items?.map(item => (
-                             <div key={item.id} className="flex gap-2 items-center bg-gray-50/50 p-2 rounded-lg">
-                                 <input type="text" placeholder="Desc" className="flex-1 px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 text-sm outline-none"
-                                    value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} required />
-                                 <input type="number" placeholder="#" className="w-16 px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 text-sm outline-none text-center"
-                                    value={item.quantity} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} />
-                                 <input type="number" placeholder="$" className="w-24 px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 text-sm outline-none text-right"
-                                    value={item.unitPrice} onChange={e => updateItem(item.id, 'unitPrice', Number(e.target.value))} />
-                                 <div className="w-28 text-right text-sm font-bold text-brand-900">{formatCurrency(item.total)}</div>
-                                 <button type="button" onClick={() => removeItem(item.id)} className="text-gray-400 hover:text-red-500 p-1 transition-colors"><Trash2 size={16} /></button>
+                             <div key={item.id} className="grid grid-cols-12 gap-2 items-center bg-white p-2 rounded-lg border border-gray-100 shadow-sm">
+                                 <div className="col-span-5">
+                                     <input type="text" placeholder="Ej. Diseño..." className="w-full px-2 py-1.5 border-b border-gray-200 focus:border-brand-500 outline-none text-sm text-gray-900 bg-transparent"
+                                        value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} required />
+                                 </div>
+                                 <div className="col-span-2">
+                                     <input type="number" min="1" className="w-full px-2 py-1.5 border-b border-gray-200 focus:border-brand-500 outline-none text-sm text-center text-gray-900 bg-transparent"
+                                        value={item.quantity} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} />
+                                 </div>
+                                 <div className="col-span-2">
+                                     <input type="number" min="0" className="w-full px-2 py-1.5 border-b border-gray-200 focus:border-brand-500 outline-none text-sm text-right text-gray-900 bg-transparent"
+                                        value={item.unitPrice} onChange={e => updateItem(item.id, 'unitPrice', Number(e.target.value))} />
+                                 </div>
+                                 <div className="col-span-2 text-right text-sm font-bold text-brand-900">
+                                     {formatCurrency(item.total)}
+                                 </div>
+                                 <div className="col-span-1 text-center">
+                                     <button type="button" onClick={() => removeItem(item.id)} className="text-gray-300 hover:text-red-500 transition-colors">
+                                         <Trash2 size={16} />
+                                     </button>
+                                 </div>
                              </div>
                          ))}
                      </div>
@@ -350,7 +391,7 @@ export const Sales = () => {
         </div>
       )}
 
-      {/* CATALOG MODAL - ENHANCED */}
+      {/* CATALOG MODAL */}
       {isCatalogOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
               <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in zoom-in duration-200 flex flex-col max-h-[80vh]">
@@ -418,6 +459,43 @@ export const Sales = () => {
           </div>
       )}
 
+      {/* CLIENT SELECTION MODAL */}
+      {isClientModalOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200">
+                  <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                      <h3 className="font-bold text-lg text-gray-900">Seleccionar Cliente</h3>
+                      <button onClick={() => setIsClientModalOpen(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+                  </div>
+                  <div className="p-4 bg-white border-b border-gray-50">
+                      <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                          <input 
+                            autoFocus
+                            type="text" 
+                            placeholder="Buscar cliente..."
+                            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-900/10"
+                            value={clientSearch}
+                            onChange={(e) => setClientSearch(e.target.value)}
+                          />
+                      </div>
+                  </div>
+                  <div className="p-2 overflow-y-auto max-h-[300px]">
+                      {availableClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(client => (
+                          <div key={client.id} onClick={() => handleSelectClient(client)} className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer rounded-lg border-b border-gray-50 last:border-0">
+                              <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-900 flex items-center justify-center text-xs font-bold">{client.name.charAt(0)}</div>
+                              <div>
+                                  <p className="font-medium text-gray-900 text-sm">{client.name}</p>
+                                  <p className="text-xs text-gray-500">{client.company || 'Sin empresa'}</p>
+                              </div>
+                          </div>
+                      ))}
+                      {availableClients.length === 0 && <p className="text-center text-sm text-gray-400 py-4">No hay clientes registrados.</p>}
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* PDF TEMPLATE */}
       {pdfPreview && (
          <div className="fixed top-0 left-0 w-full h-0 overflow-hidden">
@@ -453,7 +531,7 @@ export const Sales = () => {
                         </div>
                         <div className="w-1/2 text-right">
                             <h3 className="font-bold text-gray-900 mb-1">{settings.companyName}</h3>
-                            <p className="text-gray-500">{settings.address}</p>
+                            <p className="text-gray-500 whitespace-pre-line">{settings.address}</p>
                             <p className="text-gray-500">{settings.phone}</p>
                             <p className="text-gray-500">{settings.website}</p>
                         </div>
@@ -497,6 +575,7 @@ export const Sales = () => {
                                  <span>SUB TOTAL</span>
                                  <span>{formatCurrency(pdfPreview.subtotal)}</span>
                              </div>
+                             {/* Always show tax in PDF if it exists in the object, regardless of current toggle */}
                              {pdfPreview.tax > 0 && (
                                  <div className="flex justify-between py-2 text-sm text-gray-600 font-bold mb-1">
                                      <span>{settings.taxName} ({settings.taxRate}%)</span>

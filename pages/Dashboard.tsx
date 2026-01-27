@@ -157,23 +157,23 @@ export const Dashboard = () => {
                <span className="text-xs font-medium text-brand-600 bg-brand-50 px-2 py-1 rounded-lg">Hoy</span>
             </div>
             <div className="space-y-4">
-               <div className="flex gap-3 items-start p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer">
+               <div onClick={() => navigate('/projects')} className="flex gap-3 items-start p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer group">
                   <div className="mt-1">
-                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                      <div className="w-2 h-2 rounded-full bg-red-500 group-hover:animate-pulse"></div>
                   </div>
                   <div>
-                      <p className="text-sm font-semibold text-gray-900">Entrega Branding "Solar"</p>
+                      <p className="text-sm font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">Entrega Branding "Solar"</p>
                       <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
                          <Clock size={12} /> 15:00 PM
                       </div>
                   </div>
                </div>
-               <div className="flex gap-3 items-start p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer">
+               <div onClick={() => navigate('/projects')} className="flex gap-3 items-start p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer group">
                   <div className="mt-1">
-                      <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                      <div className="w-2 h-2 rounded-full bg-yellow-500 group-hover:animate-pulse"></div>
                   </div>
                   <div>
-                      <p className="text-sm font-semibold text-gray-900">Reunión con Constructora S.A.</p>
+                      <p className="text-sm font-semibold text-gray-900 group-hover:text-brand-600 transition-colors">Reunión con Constructora S.A.</p>
                       <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
                          <Clock size={12} /> 10:00 AM
                       </div>

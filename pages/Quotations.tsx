@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Search, Filter, Download, MessageCircle, Plus, Trash2, X, Eye, Edit3, Save } from 'lucide-react';
-import { Quote, QuoteItem, AppSettings } from '../types';
+import { Quote, QuoteItem, AppSettings, Client } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -46,6 +46,11 @@ export const Quotations = () => {
   const [pdfPreview, setPdfPreview] = useState<Quote | null>(null);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   
+  // Client Selection
+  const [availableClients, setAvailableClients] = useState<Client[]>([]);
+  const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
+
   // Tax Toggle State for the current form
   const [taxEnabled, setTaxEnabled] = useState(false);
 
@@ -55,6 +60,9 @@ export const Quotations = () => {
   useEffect(() => {
       const saved = localStorage.getItem('crm_settings');
       if (saved) setSettings(JSON.parse(saved));
+
+      const savedClients = localStorage.getItem('crm_clients');
+      if (savedClients) setAvailableClients(JSON.parse(savedClients));
   }, []);
 
   // Form State
@@ -119,6 +127,11 @@ export const Quotations = () => {
       setTaxEnabled(!!quote.taxEnabled); // Restore tax toggle state
       setEditingId(quote.id);
       setIsModalOpen(true);
+  };
+
+  const handleSelectClient = (client: Client) => {
+      setNewQuote(prev => ({ ...prev, clientName: client.name }));
+      setIsClientModalOpen(false);
   };
 
   const handleSave = (e: React.FormEvent) => {
@@ -274,8 +287,13 @@ export const Quotations = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="md:col-span-1">
                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Cliente</label>
-                   <input required type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900"
-                      value={newQuote.clientName} onChange={e => setNewQuote({...newQuote, clientName: e.target.value})} />
+                   <div className="flex gap-2">
+                       <input required type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900"
+                          value={newQuote.clientName} onChange={e => setNewQuote({...newQuote, clientName: e.target.value})} placeholder="Nombre del cliente"/>
+                       <button type="button" onClick={() => setIsClientModalOpen(true)} className="px-3 py-2 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200" title="Buscar Cliente">
+                            <Search size={20} />
+                       </button>
+                   </div>
                 </div>
                 <div>
                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Fecha Emisión</label>
@@ -355,6 +373,43 @@ export const Quotations = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* CLIENT SELECTION MODAL */}
+      {isClientModalOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200">
+                  <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                      <h3 className="font-bold text-lg text-gray-900">Seleccionar Cliente</h3>
+                      <button onClick={() => setIsClientModalOpen(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+                  </div>
+                  <div className="p-4 bg-white border-b border-gray-50">
+                      <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                          <input 
+                            autoFocus
+                            type="text" 
+                            placeholder="Buscar cliente..."
+                            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-900/10"
+                            value={clientSearch}
+                            onChange={(e) => setClientSearch(e.target.value)}
+                          />
+                      </div>
+                  </div>
+                  <div className="p-2 overflow-y-auto max-h-[300px]">
+                      {availableClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(client => (
+                          <div key={client.id} onClick={() => handleSelectClient(client)} className="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer rounded-lg border-b border-gray-50 last:border-0">
+                              <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-900 flex items-center justify-center text-xs font-bold">{client.name.charAt(0)}</div>
+                              <div>
+                                  <p className="font-medium text-gray-900 text-sm">{client.name}</p>
+                                  <p className="text-xs text-gray-500">{client.company || 'Sin empresa'}</p>
+                              </div>
+                          </div>
+                      ))}
+                      {availableClients.length === 0 && <p className="text-center text-sm text-gray-400 py-4">No hay clientes registrados.</p>}
+                  </div>
+              </div>
+          </div>
       )}
 
       {/* DETAIL Modal (View Only) */}
@@ -439,7 +494,7 @@ export const Quotations = () => {
                         </div>
                         <div className="w-1/2 text-right">
                             <h3 className="font-bold text-gray-900 mb-1">{settings.companyName}</h3>
-                            <p className="text-gray-500">{settings.address}</p>
+                            <p className="text-gray-500 whitespace-pre-line">{settings.address}</p>
                             <p className="text-gray-500">{settings.phone}</p>
                             <p className="text-gray-500">{settings.website}</p>
                         </div>

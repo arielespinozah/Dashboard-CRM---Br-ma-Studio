@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid } from 'lucide-react';
 import { Category } from '../types';
 
@@ -44,6 +44,16 @@ export const Services = () => {
 
   const [newCategoryName, setNewCategoryName] = useState('');
 
+  // Persist Categories to LS
+  useEffect(() => {
+      const savedCats = localStorage.getItem('crm_categories');
+      if (savedCats) setCategories(JSON.parse(savedCats));
+  }, []);
+
+  useEffect(() => {
+      localStorage.setItem('crm_categories', JSON.stringify(categories));
+  }, [categories]);
+
   // --- Actions ---
 
   const handleEdit = (item: CatalogItem) => {
@@ -81,7 +91,7 @@ export const Services = () => {
   const handleAddCategory = (e: React.FormEvent) => {
       e.preventDefault();
       if (newCategoryName.trim()) {
-          setCategories([...categories, { id: Math.random().toString(36).substr(2, 5), name: newCategoryName, type: activeTab }]);
+          setCategories(prev => [...prev, { id: Math.random().toString(36).substr(2, 5), name: newCategoryName, type: activeTab }]);
           setNewCategoryName('');
       }
   };

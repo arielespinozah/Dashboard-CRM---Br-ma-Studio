@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area } from 'recharts';
 import { Calendar, Download, TrendingUp, Users, DollarSign, Package } from 'lucide-react';
 
-const salesData = [
+const weekData = [
   { name: 'Lun', sales: 4000 },
   { name: 'Mar', sales: 3000 },
   { name: 'Mie', sales: 2000 },
@@ -10,6 +10,28 @@ const salesData = [
   { name: 'Vie', sales: 1890 },
   { name: 'Sab', sales: 2390 },
   { name: 'Dom', sales: 3490 },
+];
+
+const monthData = [
+    { name: 'Sem 1', sales: 12000 },
+    { name: 'Sem 2', sales: 15400 },
+    { name: 'Sem 3', sales: 11200 },
+    { name: 'Sem 4', sales: 18900 },
+];
+
+const yearData = [
+    { name: 'Ene', sales: 45000 },
+    { name: 'Feb', sales: 52000 },
+    { name: 'Mar', sales: 48000 },
+    { name: 'Abr', sales: 61000 },
+    { name: 'May', sales: 55000 },
+    { name: 'Jun', sales: 67000 },
+    { name: 'Jul', sales: 72000 },
+    { name: 'Ago', sales: 68000 },
+    { name: 'Sep', sales: 74000 },
+    { name: 'Oct', sales: 81000 },
+    { name: 'Nov', sales: 85000 },
+    { name: 'Dic', sales: 92000 },
 ];
 
 const categoryData = [
@@ -20,14 +42,26 @@ const categoryData = [
 ];
 
 export const Reports = () => {
+    const [timeRange, setTimeRange] = useState<'Week' | 'Month' | 'Year'>('Week');
+
+    const getCurrentData = () => {
+        switch(timeRange) {
+            case 'Week': return weekData;
+            case 'Month': return monthData;
+            case 'Year': return yearData;
+            default: return weekData;
+        }
+    };
+
     const handleExport = () => {
+        const data = getCurrentData();
         const csvContent = "data:text/csv;charset=utf-8," 
-            + "Dia,Ventas\n"
-            + salesData.map(e => `${e.name},${e.sales}`).join("\n");
+            + "Periodo,Ventas\n"
+            + data.map(e => `${e.name},${e.sales}`).join("\n");
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);
-        link.setAttribute("download", "reporte_ventas.csv");
+        link.setAttribute("download", `reporte_ventas_${timeRange.toLowerCase()}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -41,11 +75,19 @@ export const Reports = () => {
                     <p className="text-sm text-gray-500">Análisis y métricas de rendimiento</p>
                 </div>
                 <div className="flex gap-3">
-                     <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">
-                         <Calendar size={16} /> Últimos 30 días
-                     </button>
+                     <div className="flex bg-white border border-gray-200 rounded-xl p-1">
+                        {['Week', 'Month', 'Year'].map((range) => (
+                            <button 
+                                key={range}
+                                onClick={() => setTimeRange(range as any)}
+                                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${timeRange === range ? 'bg-brand-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                            >
+                                {range === 'Week' ? 'Semana' : range === 'Month' ? 'Mes' : 'Año'}
+                            </button>
+                        ))}
+                     </div>
                      <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg shadow-brand-900/20 active:scale-95 transition-all">
-                         <Download size={16} /> Exportar Data
+                         <Download size={16} /> Exportar
                      </button>
                 </div>
             </div>
@@ -81,11 +123,11 @@ export const Reports = () => {
             {/* Charts Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* Sales Chart */}
-                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-                    <h3 className="text-lg font-bold text-gray-900 mb-6">Rendimiento de Ventas</h3>
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm min-h-[400px]">
+                    <h3 className="text-lg font-bold text-gray-900 mb-6">Rendimiento de Ventas ({timeRange === 'Week' ? 'Semanal' : timeRange === 'Month' ? 'Mensual' : 'Anual'})</h3>
                     <div className="h-80 w-full">
                         <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={salesData}>
+                            <AreaChart data={getCurrentData()}>
                                 <defs>
                                     <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
                                         <stop offset="5%" stopColor="#162836" stopOpacity={0.1}/>
@@ -103,7 +145,7 @@ export const Reports = () => {
                 </div>
 
                 {/* Categories Chart */}
-                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm min-h-[400px]">
                     <h3 className="text-lg font-bold text-gray-900 mb-6">Ingresos por Categoría</h3>
                     <div className="h-80 w-full">
                          <ResponsiveContainer width="100%" height="100%">

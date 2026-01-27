@@ -12,8 +12,10 @@ export const Inventory = () => {
     const [items, setItems] = useState<InventoryItem[]>(initialInventory);
     const [searchTerm, setSearchTerm] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [isStockModalOpen, setIsStockModalOpen] = useState(false);
     const [stockAdjustment, setStockAdjustment] = useState({ id: '', amount: 0, type: 'add' });
+    
     const [newItem, setNewItem] = useState<Partial<InventoryItem>>({
         name: '', sku: '', category: '', quantity: 0, minStock: 5, price: 0, status: 'In Stock'
     });
@@ -32,20 +34,50 @@ export const Inventory = () => {
 
     const handleCreateItem = (e: React.FormEvent) => {
         e.preventDefault();
-        const item: InventoryItem = {
-            id: Math.random().toString(36).substr(2, 9),
-            name: newItem.name || 'Nuevo Producto',
-            sku: newItem.sku || 'SKU-NEW',
-            category: newItem.category || 'General',
-            quantity: Number(newItem.quantity),
-            minStock: Number(newItem.minStock),
-            price: Number(newItem.price),
-            status: Number(newItem.quantity) <= 0 ? 'Critical' : 'In Stock',
-            lastUpdated: new Date().toISOString().split('T')[0]
-        };
-        setItems([...items, item]);
+        
+        if (editingId) {
+            // Update Existing
+            setItems(prev => prev.map(item => {
+                if (item.id === editingId) {
+                    return {
+                        ...item,
+                        ...newItem,
+                        status: Number(newItem.quantity) <= 0 ? 'Critical' : Number(newItem.quantity) <= Number(newItem.minStock) ? 'Low Stock' : 'In Stock',
+                        lastUpdated: new Date().toISOString().split('T')[0]
+                    } as InventoryItem;
+                }
+                return item;
+            }));
+        } else {
+            // Create New
+            const item: InventoryItem = {
+                id: Math.random().toString(36).substr(2, 9),
+                name: newItem.name || 'Nuevo Producto',
+                sku: newItem.sku || 'SKU-NEW',
+                category: newItem.category || 'General',
+                quantity: Number(newItem.quantity),
+                minStock: Number(newItem.minStock),
+                price: Number(newItem.price),
+                status: Number(newItem.quantity) <= 0 ? 'Critical' : 'In Stock',
+                lastUpdated: new Date().toISOString().split('T')[0]
+            };
+            setItems([...items, item]);
+        }
+        
         setIsModalOpen(false);
         setNewItem({ name: '', sku: '', category: '', quantity: 0, minStock: 5, price: 0, status: 'In Stock' });
+    };
+
+    const handleEditItem = (item: InventoryItem) => {
+        setEditingId(item.id);
+        setNewItem(item);
+        setIsModalOpen(true);
+    };
+
+    const openNewItem = () => {
+        setEditingId(null);
+        setNewItem({ name: '', sku: '', category: '', quantity: 0, minStock: 5, price: 0, status: 'In Stock' });
+        setIsModalOpen(true);
     };
 
     const handleDeleteItem = (id: string) => {
@@ -73,6 +105,13 @@ export const Inventory = () => {
         setIsStockModalOpen(false);
     };
 
+    // Improved Search Logic
+    const filteredItems = items.filter(i => 
+        i.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        i.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        i.category.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -84,7 +123,7 @@ export const Inventory = () => {
                     <button className={btnSecondary}>
                         <Filter size={18} /> Filtros
                     </button>
-                    <button onClick={() => setIsModalOpen(true)} className={btnPrimary}>
+                    <button onClick={openNewItem} className={btnPrimary}>
                         <Plus size={18} /> Nuevo Ítem
                     </button>
                 </div>
@@ -122,7 +161,7 @@ export const Inventory = () => {
                     type="text" 
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Buscar por nombre o SKU..." 
+                    placeholder="Buscar por nombre, SKU o categoría..." 
                     className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-900/20 focus:border-brand-900 transition-all shadow-sm text-brand-900 placeholder:text-gray-400"
                 />
             </div>
@@ -142,7 +181,7 @@ export const Inventory = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
-                            {items.filter(i => i.name.toLowerCase().includes(searchTerm.toLowerCase()) || i.sku.toLowerCase().includes(searchTerm.toLowerCase())).map(item => (
+                            {filteredItems.map(item => (
                                 <tr key={item.id} className="hover:bg-gray-50 transition-colors">
                                     <td className="px-6 py-4 text-sm font-medium text-brand-900">{item.name}</td>
                                     <td className="px-6 py-4 text-sm text-gray-500">{item.sku}</td>
@@ -158,6 +197,13 @@ export const Inventory = () => {
                                     </td>
                                     <td className="px-6 py-4 text-right flex justify-end gap-2">
                                         <button 
+                                            onClick={() => handleEditItem(item)}
+                                            className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                            title="Editar"
+                                        >
+                                            <Edit3 size={16} />
+                                        </button>
+                                        <button 
                                             onClick={() => { setStockAdjustment({ id: item.id, amount: 0, type: 'add' }); setIsStockModalOpen(true); }}
                                             className="p-2 text-brand-900 bg-brand-50 hover:bg-brand-100 rounded-lg transition-colors"
                                             title="Ajustar Stock"
@@ -170,17 +216,24 @@ export const Inventory = () => {
                                     </td>
                                 </tr>
                             ))}
+                            {filteredItems.length === 0 && (
+                                <tr>
+                                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500 text-sm">
+                                        No se encontraron resultados para "{searchTerm}"
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>
             </div>
 
-            {/* Create Item Modal */}
+            {/* Create/Edit Item Modal */}
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-900/40 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
                         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                            <h3 className="font-bold text-lg text-brand-900">Nuevo Ítem</h3>
+                            <h3 className="font-bold text-lg text-brand-900">{editingId ? 'Editar Ítem' : 'Nuevo Ítem'}</h3>
                             <button onClick={() => setIsModalOpen(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
                         </div>
                         <form onSubmit={handleCreateItem} className="p-6 space-y-4">
@@ -222,7 +275,7 @@ export const Inventory = () => {
                             </div>
                             <div className="pt-2">
                                 <button type="submit" className="w-full bg-brand-900 text-white py-3 rounded-xl font-bold hover:bg-brand-800 transition-all">
-                                    Guardar Producto
+                                    {editingId ? 'Guardar Cambios' : 'Crear Producto'}
                                 </button>
                             </div>
                         </form>
