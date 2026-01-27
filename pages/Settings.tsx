@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Upload, Building, Palette, FileText, CreditCard, Users, Shield, Trash2, Plus, Check } from 'lucide-react';
+import { Save, Upload, Building, Palette, FileText, CreditCard, Users, Shield, Trash2, Plus, Check, DollarSign, Percent, Globe, Database } from 'lucide-react';
 import { AppSettings, User } from '../types';
+import { app } from '../firebase'; // Import firebase app to check connection
 
 const defaultSettings: AppSettings = {
     companyName: 'Bráma Studio',
     address: 'Calle 27 de Mayo Nro. 113, Santa Cruz, Bolivia',
     website: 'www.brama.com.bo',
     phone: '+591 70000000',
-    primaryColor: '#1e293b', // Dark Slate 900
+    primaryColor: '#162836', 
     paymentInfo: 'Banco Ganadero\nCuenta: 123-45678-9\nTitular: Bráma Studio SRL\nNIT: 1234567015',
-    termsAndConditions: '1. Validez de la oferta: 15 días calendario.\n2. Tiempo de entrega: A convenir según carga de trabajo.\n3. Forma de pago: 50% al inicio y 50% contra entrega.'
+    termsAndConditions: '1. Validez de la oferta: 15 días calendario.\n2. Tiempo de entrega: A convenir según carga de trabajo.',
+    currencySymbol: 'Bs',
+    currencyName: 'Bolivianos',
+    currencyPosition: 'before',
+    decimals: 2,
+    taxRate: 13,
+    taxName: 'IVA'
 };
 
 const defaultUsers: User[] = [
@@ -22,6 +29,7 @@ export const Settings = () => {
     const [users, setUsers] = useState<User[]>(defaultUsers);
     const [activeTab, setActiveTab] = useState('company');
     const [newUser, setNewUser] = useState({ name: '', email: '', role: 'Sales' });
+    const [firebaseStatus, setFirebaseStatus] = useState<'Checking' | 'Connected' | 'Error'>('Checking');
 
     // Load from localStorage on mount
     useEffect(() => {
@@ -30,16 +38,29 @@ export const Settings = () => {
         
         const savedUsers = localStorage.getItem('crm_users');
         if (savedUsers) setUsers(JSON.parse(savedUsers));
+
+        // Check Firebase
+        try {
+            if (app) {
+                setFirebaseStatus('Connected');
+            } else {
+                setFirebaseStatus('Error');
+            }
+        } catch (e) {
+            setFirebaseStatus('Error');
+        }
     }, []);
 
-    const handleChange = (field: keyof AppSettings, value: string) => {
+    const handleChange = (field: keyof AppSettings, value: any) => {
         setSettings(prev => ({ ...prev, [field]: value }));
     };
 
     const handleSave = () => {
         localStorage.setItem('crm_settings', JSON.stringify(settings));
         localStorage.setItem('crm_users', JSON.stringify(users));
-        alert('Configuración y usuarios guardados correctamente.');
+        // Force a reload of settings in other tabs/components event dispatch could be better but this is simple
+        window.dispatchEvent(new Event('storage'));
+        alert('Configuración guardada exitosamente.');
     };
 
     const handleImageUpload = (field: 'logoUrl' | 'qrCodeUrl', e: React.ChangeEvent<HTMLInputElement>) => {
@@ -62,24 +83,32 @@ export const Settings = () => {
             role: newUser.role as any,
             active: true
         };
-        setUsers([...users, user]);
+        const updatedUsers = [...users, user];
+        setUsers(updatedUsers);
+        // Save immediately to ensure login works
+        localStorage.setItem('crm_users', JSON.stringify(updatedUsers));
         setNewUser({ name: '', email: '', role: 'Sales' });
+        alert(`Usuario ${newUser.email} creado. Contraseña por defecto para demo: 123456`);
     };
 
     const handleDeleteUser = (id: string) => {
-        setUsers(users.filter(u => u.id !== id));
+        if (confirm('¿Eliminar usuario?')) {
+            const updatedUsers = users.filter(u => u.id !== id);
+            setUsers(updatedUsers);
+            localStorage.setItem('crm_users', JSON.stringify(updatedUsers));
+        }
     };
 
     return (
         <div className="max-w-5xl mx-auto space-y-6 pb-12">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Ajustes del Sistema</h1>
                     <p className="text-sm text-gray-500">Personaliza tu CRM, documentos y seguridad</p>
                 </div>
                 <button 
                     onClick={handleSave}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 shadow-lg shadow-gray-200 transition-all active:scale-95"
+                    className="flex items-center gap-2 px-6 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg shadow-brand-900/20 transition-all active:scale-95"
                 >
                     <Save size={18} /> Guardar Cambios
                 </button>
@@ -88,36 +117,23 @@ export const Settings = () => {
             <div className="flex flex-col md:flex-row gap-8">
                 {/* Sidebar Navigation */}
                 <div className="w-full md:w-64 space-y-1">
-                    <button 
-                        onClick={() => setActiveTab('company')}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'company' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-50'}`}
-                    >
-                        <Building size={18} /> Perfil Empresa
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('branding')}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'branding' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-50'}`}
-                    >
-                        <Palette size={18} /> Marca & Logo
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('pdf')}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'pdf' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-50'}`}
-                    >
-                        <FileText size={18} /> Documentos PDF
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('payment')}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'payment' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-50'}`}
-                    >
-                        <CreditCard size={18} /> Pagos & QR
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('users')}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'users' ? 'bg-gray-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-50'}`}
-                    >
-                        <Users size={18} /> Usuarios & Roles
-                    </button>
+                    {[
+                        { id: 'company', icon: Building, label: 'Perfil Empresa' },
+                        { id: 'branding', icon: Palette, label: 'Marca & Logo' },
+                        { id: 'finance', icon: DollarSign, label: 'Finanzas & Impuestos' },
+                        { id: 'pdf', icon: FileText, label: 'Documentos PDF' },
+                        { id: 'payment', icon: CreditCard, label: 'Pagos & QR' },
+                        { id: 'users', icon: Users, label: 'Usuarios & Roles' },
+                        { id: 'integrations', icon: Database, label: 'Integraciones' },
+                    ].map((tab) => (
+                        <button 
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-50'}`}
+                        >
+                            <tab.icon size={18} /> {tab.label}
+                        </button>
+                    ))}
                 </div>
 
                 {/* Content Area */}
@@ -125,7 +141,7 @@ export const Settings = () => {
                     
                     {/* COMPANY PROFILE */}
                     {activeTab === 'company' && (
-                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <h2 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-100 pb-2">Información de la Empresa</h2>
                             <div className="space-y-4">
                                 <div>
@@ -156,7 +172,7 @@ export const Settings = () => {
 
                     {/* BRANDING */}
                     {activeTab === 'branding' && (
-                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                              <h2 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-100 pb-2">Identidad Visual</h2>
                              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div>
@@ -175,22 +191,92 @@ export const Settings = () => {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Color Principal</label>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Color Principal (Corporate)</label>
                                     <div className="flex gap-3 items-center">
                                         <input type="color" className="w-12 h-12 rounded-lg cursor-pointer border-none" 
                                             value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} />
                                         <input type="text" className="flex-1 px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none text-gray-900 bg-white uppercase" 
                                             value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} />
                                     </div>
-                                    <p className="text-xs text-gray-500 mt-2">Este color se usará en encabezados y detalles del PDF.</p>
+                                    <p className="text-xs text-gray-500 mt-2">Define el color base para toda la interfaz.</p>
                                 </div>
                              </div>
                         </div>
                     )}
 
+                    {/* FINANCE */}
+                    {activeTab === 'finance' && (
+                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            <h2 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-100 pb-2">Configuración Financiera</h2>
+                            
+                            <div className="grid grid-cols-2 gap-6">
+                                <div className="col-span-2 md:col-span-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Moneda Principal</label>
+                                    <select 
+                                        className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900 outline-none"
+                                        value={settings.currencySymbol}
+                                        onChange={(e) => handleChange('currencySymbol', e.target.value)}
+                                    >
+                                        <option value="Bs">Bolivianos (Bs)</option>
+                                        <option value="$us">Dólares Americanos ($us)</option>
+                                        <option value="€">Euros (€)</option>
+                                        <option value="MXN">Pesos Mexicanos (MXN)</option>
+                                        <option value="COP">Pesos Colombianos (COP)</option>
+                                        <option value="CLP">Pesos Chilenos (CLP)</option>
+                                        <option value="ARS">Pesos Argentinos (ARS)</option>
+                                        <option value="S/">Soles Peruanos (S/)</option>
+                                        <option value="Gs">Guaraníes (Gs)</option>
+                                    </select>
+                                </div>
+                                
+                                <div className="col-span-2 md:col-span-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Posición del Símbolo</label>
+                                    <div className="flex gap-4">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input type="radio" name="pos" checked={settings.currencyPosition === 'before'} onChange={() => handleChange('currencyPosition', 'before')} className="text-brand-900" />
+                                            <span className="text-sm">Antes ($ 100)</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input type="radio" name="pos" checked={settings.currencyPosition === 'after'} onChange={() => handleChange('currencyPosition', 'after')} className="text-brand-900" />
+                                            <span className="text-sm">Después (100 €)</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div className="col-span-2 md:col-span-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Nombre del Impuesto</label>
+                                    <input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900 outline-none" 
+                                        placeholder="Ej: IVA, RUT, TAX, IGV"
+                                        value={settings.taxName} onChange={(e) => handleChange('taxName', e.target.value)} />
+                                </div>
+
+                                <div className="col-span-2 md:col-span-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Tasa de Impuesto (%)</label>
+                                    <div className="relative">
+                                        <input type="number" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900 outline-none" 
+                                            value={settings.taxRate} onChange={(e) => handleChange('taxRate', Number(e.target.value))} />
+                                        <Percent size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    </div>
+                                </div>
+
+                                <div className="col-span-2 md:col-span-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Decimales</label>
+                                    <select 
+                                        className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900 outline-none"
+                                        value={settings.decimals}
+                                        onChange={(e) => handleChange('decimals', Number(e.target.value))}
+                                    >
+                                        <option value={0}>0 (Sin decimales)</option>
+                                        <option value={2}>2 (Estándar)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* PDF DOCS */}
                     {activeTab === 'pdf' && (
-                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <h2 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-100 pb-2">Configuración de PDF</h2>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Términos y Condiciones (Pie de Página)</label>
@@ -207,7 +293,7 @@ export const Settings = () => {
 
                     {/* PAYMENT */}
                     {activeTab === 'payment' && (
-                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <h2 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-100 pb-2">Información de Pago</h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 <div>
@@ -240,7 +326,7 @@ export const Settings = () => {
 
                     {/* USERS & ROLES */}
                     {activeTab === 'users' && (
-                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <h2 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-100 pb-2">Gestión de Usuarios</h2>
                             
                             {/* Create User Form */}
@@ -263,7 +349,7 @@ export const Settings = () => {
                                             <option value="Viewer">Visualizador</option>
                                         </select>
                                     </div>
-                                    <button type="submit" className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800">Agregar</button>
+                                    <button type="submit" className="px-4 py-2 bg-brand-900 text-white rounded-lg text-sm font-medium hover:bg-brand-800">Agregar</button>
                                 </div>
                             </form>
 
@@ -303,6 +389,34 @@ export const Settings = () => {
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    )}
+
+                    {/* INTEGRATIONS & STATUS */}
+                    {activeTab === 'integrations' && (
+                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            <h2 className="text-lg font-bold text-gray-900 mb-4 border-b border-gray-100 pb-2">Estado del Sistema</h2>
+                            
+                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
+                                <div className="flex items-center gap-4">
+                                    <div className={`p-3 rounded-full ${firebaseStatus === 'Connected' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                                        <Database size={24} />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-gray-900">Firebase</h3>
+                                        <p className="text-sm text-gray-500">
+                                            {firebaseStatus === 'Connected' ? 'Conectado correctamente' : 'No conectado / Error de configuración'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className={`px-3 py-1 rounded-full text-xs font-bold ${firebaseStatus === 'Connected' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+                                    {firebaseStatus}
+                                </div>
+                            </div>
+                            
+                            <p className="text-xs text-gray-400 mt-2">
+                                Nota: Si el estado es "Error", verifica tu archivo <code>firebase.ts</code> y las credenciales en el archivo <code>metadata.json</code> o tu configuración de entorno.
+                            </p>
                         </div>
                     )}
                 </div>

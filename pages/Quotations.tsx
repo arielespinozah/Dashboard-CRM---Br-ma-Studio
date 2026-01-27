@@ -19,19 +19,6 @@ const initialQuotes: Quote[] = [
           { id: '1', description: 'Diseño de Logo', quantity: 1, unitPrice: 1500, total: 1500 }
       ] 
   },
-  { 
-      id: 'COT-2023-002', 
-      clientName: 'Empresa Constructora S.A.', 
-      date: '2023-10-25', 
-      validUntil: '2023-11-25',
-      subtotal: 8500,
-      tax: 0,
-      total: 8500, 
-      status: 'Sent', 
-      items: [
-        { id: '1', description: 'Mantenimiento de Servidores', quantity: 2, unitPrice: 4250, total: 8500 }
-      ] 
-  },
 ];
 
 const defaultSettings: AppSettings = {
@@ -39,9 +26,15 @@ const defaultSettings: AppSettings = {
     address: 'Calle 27 de Mayo Nro. 113, Santa Cruz, Bolivia',
     website: 'www.brama.com.bo',
     phone: '+591 70000000',
-    primaryColor: '#2563eb',
+    primaryColor: '#162836',
     paymentInfo: 'Banco Ganadero\nCuenta: 123-45678-9',
-    termsAndConditions: 'Validez: 15 días.'
+    termsAndConditions: 'Validez: 15 días.',
+    currencySymbol: 'Bs',
+    currencyName: 'Bolivianos',
+    currencyPosition: 'before',
+    decimals: 2,
+    taxRate: 13,
+    taxName: 'IVA'
 };
 
 export const Quotations = () => {
@@ -53,6 +46,9 @@ export const Quotations = () => {
   const [pdfPreview, setPdfPreview] = useState<Quote | null>(null);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   
+  // Tax Toggle State for the current form
+  const [taxEnabled, setTaxEnabled] = useState(false);
+
   const printRef = useRef<HTMLDivElement>(null);
 
   // Load settings
@@ -67,13 +63,24 @@ export const Quotations = () => {
       date: new Date().toISOString().split('T')[0],
       validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       status: 'Draft',
-      items: []
+      items: [],
+      subtotal: 0,
+      tax: 0,
+      total: 0
   });
 
-  const calculateTotals = (items: QuoteItem[]) => {
-      const sub = items.reduce((acc, item) => acc + item.total, 0);
-      return { subtotal: sub, total: sub };
+  const formatCurrency = (amount: number) => {
+      const val = amount.toLocaleString(undefined, { minimumFractionDigits: settings.decimals, maximumFractionDigits: settings.decimals });
+      return settings.currencyPosition === 'before' ? `${settings.currencySymbol} ${val}` : `${val} ${settings.currencySymbol}`;
   };
+
+  // Recalculate totals whenever items or taxEnabled changes
+  useEffect(() => {
+      const sub = newQuote.items?.reduce((acc, item) => acc + item.total, 0) || 0;
+      const tax = taxEnabled ? sub * (settings.taxRate / 100) : 0;
+      const total = sub + tax;
+      setNewQuote(prev => ({ ...prev, subtotal: sub, tax, total }));
+  }, [newQuote.items, taxEnabled, settings.taxRate]);
 
   const addItem = () => {
       const newItem: QuoteItem = {
@@ -98,22 +105,18 @@ export const Quotations = () => {
               }
               return item;
           }) || [];
-          const totals = calculateTotals(updatedItems);
-          return { ...prev, items: updatedItems, ...totals };
+          return { ...prev, items: updatedItems };
       });
   };
 
   const removeItem = (id: string) => {
-      setNewQuote(prev => {
-          const updatedItems = prev.items?.filter(item => item.id !== id) || [];
-          const totals = calculateTotals(updatedItems);
-          return { ...prev, items: updatedItems, ...totals };
-      });
+      setNewQuote(prev => ({ ...prev, items: prev.items?.filter(item => item.id !== id) || [] }));
   };
 
   const openEdit = (quote: Quote) => {
       setViewingQuote(null);
       setNewQuote(quote);
+      setTaxEnabled(!!quote.taxEnabled); // Restore tax toggle state
       setEditingId(quote.id);
       setIsModalOpen(true);
   };
@@ -121,24 +124,23 @@ export const Quotations = () => {
   const handleSave = (e: React.FormEvent) => {
       e.preventDefault();
       
+      const quoteData: Quote = {
+          ...(newQuote as Quote),
+          taxEnabled: taxEnabled // Persist tax state
+      };
+
       if (editingId) {
-          setQuotes(prev => prev.map(q => q.id === editingId ? { ...newQuote, id: editingId } as Quote : q));
+          setQuotes(prev => prev.map(q => q.id === editingId ? { ...quoteData, id: editingId } : q));
       } else {
           const quoteId = `COT-${new Date().getFullYear()}-${String(quotes.length + 1).padStart(3, '0')}`;
-          const fullQuote: Quote = {
-              ...(newQuote as Quote),
-              id: quoteId,
-              subtotal: newQuote.subtotal || 0,
-              total: newQuote.total || 0,
-          };
-          setQuotes([fullQuote, ...quotes]);
+          setQuotes([{ ...quoteData, id: quoteId }, ...quotes]);
       }
       setIsModalOpen(false);
   };
 
   const handleShareWhatsApp = (quote: Quote) => {
-     const itemsList = quote.items.map(i => `- ${i.description} (${i.quantity} x Bs.${i.unitPrice})`).join('%0A');
-     const text = `Hola *${quote.clientName}*,%0A%0AEspero que estés muy bien.%0A%0ADesde *${settings.companyName}* te enviamos el detalle de la cotización *${quote.id}*:%0A%0A${itemsList}%0A%0A*Total: Bs. ${quote.total.toLocaleString()}*%0A%0ADescarga el PDF adjunto para más detalle.%0A%0ASaludos,%0AEquipo ${settings.companyName}`;
+     const itemsList = quote.items.map(i => `- ${i.description} (${i.quantity} x ${formatCurrency(i.unitPrice)})`).join('%0A');
+     const text = `Hola *${quote.clientName}*,%0A%0AEspero que estés muy bien.%0A%0ADesde *${settings.companyName}* te enviamos el detalle de la cotización *${quote.id}*:%0A%0A${itemsList}%0A%0A*Total: ${formatCurrency(quote.total)}*%0A%0ADescarga el PDF adjunto para más detalle.%0A%0ASaludos,%0AEquipo ${settings.companyName}`;
      window.open(`https://wa.me/?text=${text}`, '_blank');
   };
 
@@ -189,12 +191,13 @@ export const Quotations = () => {
                 setNewQuote({
                     clientName: '', date: new Date().toISOString().split('T')[0],
                     validUntil: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                    status: 'Draft', items: []
+                    status: 'Draft', items: [], subtotal: 0, tax: 0, total: 0
                 });
+                setTaxEnabled(false);
                 addItem(); 
                 setIsModalOpen(true);
             }}
-            className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 shadow-lg shadow-brand-200 transition-all active:scale-95"
+            className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg shadow-brand-900/20 transition-all active:scale-95"
           >
             <Plus size={16} /> Nueva Cotización
           </button>
@@ -209,7 +212,7 @@ export const Quotations = () => {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           placeholder="Buscar cotizaciones..." 
-          className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all shadow-sm text-gray-900"
+          className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-900/20 focus:border-brand-900 transition-all shadow-sm text-gray-900"
         />
       </div>
 
@@ -222,7 +225,7 @@ export const Quotations = () => {
                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">ID</th>
                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Cliente</th>
                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fecha</th>
-                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total (Bs.)</th>
+                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total</th>
                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Estado</th>
                 <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Acciones</th>
                 </tr>
@@ -233,10 +236,10 @@ export const Quotations = () => {
                     q.id.toLowerCase().includes(searchTerm.toLowerCase())
                 ).map((quote) => (
                 <tr key={quote.id} className="hover:bg-gray-50 transition-colors group cursor-pointer" onClick={() => setViewingQuote(quote)}>
-                    <td className="px-6 py-4 text-sm font-medium text-brand-600">{quote.id}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-brand-900">{quote.id}</td>
                     <td className="px-6 py-4 text-sm text-gray-900 font-medium">{quote.clientName}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{quote.date}</td>
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900">Bs. {quote.total.toLocaleString()}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(quote.total)}</td>
                     <td className="px-6 py-4 text-sm"><StatusBadge status={quote.status} /></td>
                     <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex justify-end gap-1">
@@ -289,7 +292,7 @@ export const Quotations = () => {
               <div>
                  <div className="flex justify-between items-center mb-4">
                     <h4 className="font-semibold text-gray-800">Ítems / Servicios</h4>
-                    <button type="button" onClick={addItem} className="text-sm flex items-center gap-1.5 text-brand-600 font-medium bg-brand-50 px-3 py-1.5 rounded-lg hover:bg-brand-100">
+                    <button type="button" onClick={addItem} className="text-sm flex items-center gap-1.5 text-brand-900 font-medium bg-brand-50 px-3 py-1.5 rounded-lg hover:bg-brand-100 transition-colors">
                         <Plus size={16} /> Agregar
                     </button>
                  </div>
@@ -297,41 +300,55 @@ export const Quotations = () => {
                      {newQuote.items?.map((item) => (
                          <div key={item.id} className="flex gap-4 items-start bg-gray-50/50 p-3 rounded-xl border border-gray-100">
                              <div className="flex-1">
-                                 <input type="text" placeholder="Descripción" className="w-full bg-transparent border-b border-gray-300 focus:border-brand-500 outline-none px-1 py-1 text-sm text-gray-900"
+                                 <input type="text" placeholder="Descripción" className="w-full bg-transparent border-b border-gray-300 focus:border-brand-900 outline-none px-1 py-1 text-sm text-gray-900"
                                     value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} required />
                              </div>
                              <div className="w-20">
-                                 <input type="number" placeholder="Cant." min="1" className="w-full bg-transparent border-b border-gray-300 focus:border-brand-500 outline-none px-1 py-1 text-sm text-center text-gray-900"
+                                 <input type="number" placeholder="Cant." min="1" className="w-full bg-transparent border-b border-gray-300 focus:border-brand-900 outline-none px-1 py-1 text-sm text-center text-gray-900"
                                     value={item.quantity} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} />
                              </div>
                              <div className="w-24">
-                                 <input type="number" placeholder="Precio" min="0" className="w-full bg-transparent border-b border-gray-300 focus:border-brand-500 outline-none px-1 py-1 text-sm text-right text-gray-900"
+                                 <input type="number" placeholder="Precio" min="0" className="w-full bg-transparent border-b border-gray-300 focus:border-brand-900 outline-none px-1 py-1 text-sm text-right text-gray-900"
                                     value={item.unitPrice} onChange={e => updateItem(item.id, 'unitPrice', Number(e.target.value))} />
                              </div>
-                             <div className="w-24 text-right text-sm font-medium py-1 text-gray-700">Bs. {item.total.toFixed(2)}</div>
+                             <div className="w-28 text-right text-sm font-medium py-1 text-gray-700">{formatCurrency(item.total)}</div>
                              <button type="button" onClick={() => removeItem(item.id)} className="text-gray-400 hover:text-red-500 p-1"><Trash2 size={16} /></button>
                          </div>
                      ))}
                  </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t border-gray-100 pt-6">
-                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Notas</label>
-                    <textarea className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900 text-sm h-32 resize-none"
-                        value={newQuote.notes} onChange={e => setNewQuote({...newQuote, notes: e.target.value})}></textarea>
+              <div className="bg-gray-50 p-6 rounded-xl border border-gray-100">
+                 <div className="flex justify-between items-center mb-2">
+                     <div className="flex items-center gap-2">
+                         <input 
+                            type="checkbox" 
+                            id="taxToggle"
+                            checked={taxEnabled} 
+                            onChange={(e) => setTaxEnabled(e.target.checked)}
+                            className="w-4 h-4 text-brand-900 rounded focus:ring-brand-900 border-gray-300"
+                         />
+                         <label htmlFor="taxToggle" className="text-sm text-gray-700 font-medium select-none">Incluir {settings.taxName} ({settings.taxRate}%)</label>
+                     </div>
                  </div>
-                 <div className="flex flex-col justify-end gap-3 text-right">
-                    <div className="flex justify-between font-bold text-xl text-brand-900 border-t border-gray-100 pt-3">
-                        <span>Total:</span>
-                        <span>Bs. {newQuote.total?.toFixed(2)}</span>
-                    </div>
+                 <div className="space-y-1 text-right pt-2">
+                     <div className="text-sm text-gray-500 flex justify-between"><span>Subtotal:</span> <span>{formatCurrency(newQuote.subtotal || 0)}</span></div>
+                     {taxEnabled && (
+                        <div className="text-sm text-gray-500 flex justify-between"><span>{settings.taxName} ({settings.taxRate}%):</span> <span>{formatCurrency(newQuote.tax || 0)}</span></div>
+                     )}
+                     <div className="text-xl font-bold text-gray-900 flex justify-between pt-2 border-t border-gray-200 mt-2"><span>Total:</span> <span>{formatCurrency(newQuote.total || 0)}</span></div>
                  </div>
+              </div>
+
+              <div className="grid grid-cols-1">
+                 <label className="block text-sm font-medium text-gray-700 mb-2">Notas Adicionales</label>
+                 <textarea className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900 text-sm h-24 resize-none"
+                    value={newQuote.notes} onChange={e => setNewQuote({...newQuote, notes: e.target.value})}></textarea>
               </div>
 
               <div className="flex justify-end gap-3 pt-4">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2.5 border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 bg-white">Cancelar</button>
-                <button type="submit" className="px-6 py-2.5 bg-brand-600 text-white rounded-xl hover:bg-brand-700 shadow-lg shadow-brand-200 flex items-center gap-2">
+                <button type="submit" className="px-6 py-2.5 bg-brand-900 text-white rounded-xl hover:bg-brand-800 shadow-lg shadow-brand-900/20 flex items-center gap-2">
                     <Save size={18} /> Guardar
                 </button>
               </div>
@@ -356,7 +373,7 @@ export const Quotations = () => {
                         </div>
                         <div className="text-right">
                             <p className="text-sm text-gray-500">Monto Total</p>
-                            <h4 className="font-bold text-brand-600 text-xl">Bs. {viewingQuote.total.toLocaleString()}</h4>
+                            <h4 className="font-bold text-brand-900 text-xl">{formatCurrency(viewingQuote.total)}</h4>
                         </div>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-4 mb-6">
@@ -365,7 +382,7 @@ export const Quotations = () => {
                              {viewingQuote.items.map(i => (
                                  <li key={i.id} className="flex justify-between text-sm">
                                      <span className="text-gray-700">{i.quantity} x {i.description}</span>
-                                     <span className="font-medium text-gray-900">Bs. {i.total}</span>
+                                     <span className="font-medium text-gray-900">{formatCurrency(i.total)}</span>
                                  </li>
                              ))}
                          </ul>
@@ -386,12 +403,12 @@ export const Quotations = () => {
           </div>
       )}
 
-      {/* PDF TEMPLATE (PRO-FORMA STYLE - SAME AS SALES FOR CONSISTENCY) */}
+      {/* PDF TEMPLATE */}
       {pdfPreview && (
          <div className="fixed top-0 left-0 w-full h-0 overflow-hidden">
             <div ref={printRef} className="w-[210mm] min-h-[297mm] bg-white text-slate-800 relative font-sans">
                 {/* DARK HEADER */}
-                <div className="bg-[#1e293b] text-white p-12 flex justify-between items-center">
+                <div className="bg-[#1e293b] text-white p-12 flex justify-between items-center" style={{ backgroundColor: settings.primaryColor }}>
                     <div className="flex items-center gap-4">
                          {settings.logoUrl ? (
                              <img src={settings.logoUrl} className="h-16 object-contain bg-white rounded-lg p-1" />
@@ -402,9 +419,9 @@ export const Quotations = () => {
                          </div>
                     </div>
                     <div className="text-right">
-                        <h2 className="text-4xl font-bold tracking-tight mb-2">PRO-FORMA</h2>
+                        <h2 className="text-4xl font-bold tracking-tight mb-2">COTIZACIÓN</h2>
                         <div className="text-xs opacity-80 space-y-1">
-                            <div className="flex justify-between gap-8"><span>INVOICE NRO:</span> <span className="font-mono">{pdfPreview.id.replace('COT-', '')}</span></div>
+                            <div className="flex justify-between gap-8"><span>NRO:</span> <span className="font-mono">{pdfPreview.id.replace('COT-', '')}</span></div>
                             <div className="flex justify-between gap-8"><span>EMISIÓN:</span> <span>{pdfPreview.date}</span></div>
                             <div className="flex justify-between gap-8"><span>VÁLIDO HASTA:</span> <span>{pdfPreview.validUntil}</span></div>
                         </div>
@@ -430,7 +447,7 @@ export const Quotations = () => {
 
                     {/* TABLE */}
                     <div className="mb-12">
-                        <div className="bg-[#1e293b] text-white flex px-6 py-3 text-sm font-bold uppercase tracking-wider rounded-t-sm">
+                        <div className="bg-[#1e293b] text-white flex px-6 py-3 text-sm font-bold uppercase tracking-wider rounded-t-sm" style={{ backgroundColor: settings.primaryColor }}>
                             <div className="flex-1">Descripción</div>
                             <div className="w-24 text-center">Cantidad</div>
                             <div className="w-32 text-right">Precio</div>
@@ -441,8 +458,8 @@ export const Quotations = () => {
                                 <div key={idx} className={`flex px-6 py-4 text-sm ${idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}`}>
                                     <div className="flex-1 font-medium text-gray-800">{item.description}</div>
                                     <div className="w-24 text-center text-gray-600">{item.quantity}</div>
-                                    <div className="w-32 text-right text-gray-600">{item.unitPrice.toLocaleString()} Bs</div>
-                                    <div className="w-32 text-right font-bold text-gray-900">{item.total.toLocaleString()} Bs</div>
+                                    <div className="w-32 text-right text-gray-600">{formatCurrency(item.unitPrice)}</div>
+                                    <div className="w-32 text-right font-bold text-gray-900">{formatCurrency(item.total)}</div>
                                 </div>
                             ))}
                         </div>
@@ -459,11 +476,17 @@ export const Quotations = () => {
                         <div className="w-1/2 pl-12">
                              <div className="flex justify-between py-2 text-sm text-gray-600 font-bold mb-2">
                                  <span>SUB TOTAL</span>
-                                 <span>{pdfPreview.subtotal.toLocaleString()} Bs</span>
+                                 <span>{formatCurrency(pdfPreview.subtotal)}</span>
                              </div>
-                             <div className="flex justify-between py-3 text-xl font-bold text-gray-900 border-b-2 border-gray-900">
+                             {pdfPreview.tax > 0 && (
+                                <div className="flex justify-between py-2 text-sm text-gray-600 font-bold mb-2">
+                                    <span>{settings.taxName} ({settings.taxRate}%)</span>
+                                    <span>{formatCurrency(pdfPreview.tax)}</span>
+                                </div>
+                             )}
+                             <div className="flex justify-between py-3 text-xl font-bold text-gray-900 border-b-2 border-gray-900" style={{ borderColor: settings.primaryColor }}>
                                  <span>TOTAL</span>
-                                 <span>{pdfPreview.total.toLocaleString()} Bs</span>
+                                 <span>{formatCurrency(pdfPreview.total)}</span>
                              </div>
                         </div>
                     </div>

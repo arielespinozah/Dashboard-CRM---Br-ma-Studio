@@ -20,6 +20,19 @@ const categoryData = [
 ];
 
 export const Reports = () => {
+    const handleExport = () => {
+        const csvContent = "data:text/csv;charset=utf-8," 
+            + "Dia,Ventas\n"
+            + salesData.map(e => `${e.name},${e.sales}`).join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "reporte_ventas.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     return (
         <div className="space-y-8">
             <div className="flex justify-between items-center">
@@ -31,7 +44,7 @@ export const Reports = () => {
                      <button className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">
                          <Calendar size={16} /> Últimos 30 días
                      </button>
-                     <button className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 shadow-lg shadow-brand-200">
+                     <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg shadow-brand-900/20 active:scale-95 transition-all">
                          <Download size={16} /> Exportar Data
                      </button>
                 </div>
@@ -75,15 +88,15 @@ export const Reports = () => {
                             <AreaChart data={salesData}>
                                 <defs>
                                     <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/>
-                                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                                        <stop offset="5%" stopColor="#162836" stopOpacity={0.1}/>
+                                        <stop offset="95%" stopColor="#162836" stopOpacity={0}/>
                                     </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} dy={10} />
                                 <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
                                 <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}} />
-                                <Area type="monotone" dataKey="sales" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
+                                <Area type="monotone" dataKey="sales" stroke="#162836" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>
@@ -99,7 +112,7 @@ export const Reports = () => {
                                 <XAxis type="number" hide />
                                 <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{fill: '#475569', fontSize: 13, fontWeight: 500}} width={80} />
                                 <Tooltip cursor={{fill: 'transparent'}} contentStyle={{borderRadius: '12px', border: 'none'}} />
-                                <Bar dataKey="value" fill="#3b82f6" radius={[0, 6, 6, 0]} barSize={24} />
+                                <Bar dataKey="value" fill="#00f24a" radius={[0, 6, 6, 0]} barSize={24} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>

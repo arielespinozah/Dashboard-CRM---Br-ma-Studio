@@ -56,6 +56,7 @@ export interface Quote {
   total: number;
   status: 'Draft' | 'Sent' | 'Approved' | 'Paid' | 'Rejected';
   notes?: string;
+  taxEnabled?: boolean; // New field to persist state
 }
 
 export interface Sale {
@@ -65,12 +66,26 @@ export interface Sale {
   date: string;
   items: QuoteItem[];
   subtotal: number;
+  tax: number;
   total: number;
   amountPaid: number; // For partial payments
   balance: number; // Remaining amount
   paymentStatus: 'Pending' | 'Partial' | 'Paid';
   paymentMethod: 'Cash' | 'Transfer' | 'QR' | 'Card';
   notes?: string;
+}
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  sku: string;
+  category: string;
+  quantity: number;
+  minStock: number;
+  price: number;
+  status: 'In Stock' | 'Low Stock' | 'Critical';
+  lastUpdated: string;
+  type?: 'Product' | 'Service'; // Added type for catalog filtering
 }
 
 export interface AppSettings {
@@ -83,6 +98,14 @@ export interface AppSettings {
   qrCodeUrl?: string;
   paymentInfo: string;
   termsAndConditions: string;
+  
+  // Finance Settings
+  currencySymbol: string; // e.g., "Bs", "$", "€"
+  currencyName: string;   // e.g., "Bolivianos"
+  currencyPosition: 'before' | 'after'; // "$ 100" vs "100 €"
+  decimals: number;       // 0 or 2
+  taxRate: number;        // e.g., 13, 16, 21
+  taxName: string;        // e.g., "IVA", "RUT", "IGV", "TAX"
 }
 
 export interface User {
@@ -92,6 +115,7 @@ export interface User {
   role: 'Admin' | 'Sales' | 'Viewer';
   avatar?: string;
   active: boolean;
+  password?: string; // In a real app, this would be hashed
 }
 
 export interface Category {
@@ -115,4 +139,10 @@ export interface ChatMessage {
   text: string;
   sender: 'me' | 'client';
   timestamp: string;
+}
+
+export interface AuthContextType {
+  user: User | null;
+  login: (email: string) => void;
+  logout: () => void;
 }

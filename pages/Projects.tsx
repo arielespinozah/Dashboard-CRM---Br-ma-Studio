@@ -25,16 +25,6 @@ const initialProjects: Project[] = [
     budget: 450,
     category: 'Repair'
   },
-  {
-    id: '3',
-    title: 'Sellos Automáticos x50',
-    client: 'Banco Nacional',
-    status: Status.COMPLETED,
-    priority: Priority.LOW,
-    dueDate: '2023-10-30',
-    budget: 2500,
-    category: 'Sublimation'
-  }
 ];
 
 const PriorityBadge = ({ priority }: { priority: Priority }) => {
@@ -194,7 +184,7 @@ export const Projects = () => {
         </div>
         <button 
           onClick={openNewProject}
-          className="flex items-center gap-2 bg-brand-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-700 transition-all shadow-lg shadow-brand-200 active:scale-95"
+          className="flex items-center gap-2 bg-brand-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-800 transition-all shadow-lg shadow-brand-900/20 active:scale-95"
         >
           <Plus size={18} />
           Nuevo Proyecto
@@ -359,7 +349,7 @@ export const Projects = () => {
                 </button>
                 <button 
                   type="submit" 
-                  className="flex-1 px-4 py-2 bg-brand-600 text-white rounded-xl font-medium hover:bg-brand-700 transition-colors shadow-md shadow-brand-200 flex justify-center items-center gap-2"
+                  className="flex-1 px-4 py-2 bg-brand-900 text-white rounded-xl font-medium hover:bg-brand-800 transition-colors shadow-md shadow-brand-900/20 flex justify-center items-center gap-2"
                 >
                   <Save size={18} />
                   {editingId ? 'Guardar Cambios' : 'Crear Proyecto'}

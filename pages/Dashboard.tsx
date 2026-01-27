@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, 
   Users, 
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useNavigate } from 'react-router-dom';
+import { AppSettings } from '../types';
 
 const data = [
   { name: 'Ene', income: 4200 },
@@ -41,6 +42,15 @@ const KPICard = ({ title, value, icon: Icon, trend, positive, colorClass }: any)
 
 export const Dashboard = () => {
   const navigate = useNavigate();
+  const [currencySymbol, setCurrencySymbol] = useState('Bs');
+
+  useEffect(() => {
+      const saved = localStorage.getItem('crm_settings');
+      if (saved) {
+          const settings: AppSettings = JSON.parse(saved);
+          setCurrencySymbol(settings.currencySymbol);
+      }
+  }, []);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -60,7 +70,7 @@ export const Dashboard = () => {
            </button>
            <button 
              onClick={() => navigate('/quotes')}
-             className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-colors shadow-lg shadow-gray-200"
+             className="flex items-center justify-center gap-2 px-5 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 transition-colors shadow-lg shadow-brand-900/20"
             >
              <Plus size={18} />
              Nueva Cotización
@@ -70,7 +80,7 @@ export const Dashboard = () => {
 
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <KPICard title="Ingresos del Mes" value="Bs. 7,490" icon={DollarSign} trend={12.5} positive={true} colorClass="bg-green-50 text-green-600" />
+        <KPICard title="Ingresos del Mes" value={`${currencySymbol} 7,490`} icon={DollarSign} trend={12.5} positive={true} colorClass="bg-green-50 text-green-600" />
         <KPICard title="Nuevos Clientes" value="24" icon={Users} trend={8.2} positive={true} colorClass="bg-blue-50 text-blue-600" />
         <KPICard title="Proyectos Activos" value="12" icon={Briefcase} trend={2.1} positive={true} colorClass="bg-purple-50 text-purple-600" />
         <KPICard title="Ventas Totales" value="156" icon={ShoppingBag} trend={5.4} positive={true} colorClass="bg-orange-50 text-orange-600" />
