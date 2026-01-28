@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -12,7 +12,9 @@ import {
   Printer,
   PenTool,
   ShoppingBag,
-  Boxes
+  Boxes,
+  Wallet,
+  Calendar
 } from 'lucide-react';
 import { User } from '../types';
 
@@ -24,37 +26,59 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ onCloseMobile, user, onLogout }) => {
   const location = useLocation();
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+      const s = localStorage.getItem('crm_settings');
+      if (s) {
+          const settings = JSON.parse(s);
+          if (settings.logoUrl) setLogoUrl(settings.logoUrl);
+      }
+  }, []);
 
   const isActive = (path: string) => location.pathname === path;
 
-  // Filter menu items based on role
+  // Granular Permission Logic
+  const hasPermission = (perm: string) => {
+      if (!user) return false;
+      if (user.role === 'Admin') return true; 
+      if (user.permissions?.includes('all')) return true;
+      return user.permissions?.includes(perm) || false;
+  };
+
   const allNavItems = [
-    { name: 'Dashboard', icon: LayoutDashboard, path: '/', roles: ['Admin', 'Sales', 'Viewer'] },
-    { name: 'Proyectos', icon: Briefcase, path: '/projects', roles: ['Admin', 'Sales', 'Viewer'] },
-    { name: 'Cotizaciones', icon: FileText, path: '/quotes', roles: ['Admin', 'Sales'] },
-    { name: 'Ventas', icon: ShoppingBag, path: '/sales', roles: ['Admin', 'Sales'] },
-    { name: 'Clientes', icon: Users, path: '/clients', roles: ['Admin', 'Sales'] },
-    { name: 'Inventario', icon: Boxes, path: '/inventory', roles: ['Admin', 'Sales'] },
-    { name: 'Catálogo', icon: Package, path: '/services', roles: ['Admin', 'Sales', 'Viewer'] },
-    { name: 'Comunicaciones', icon: MessageSquare, path: '/communications', roles: ['Admin', 'Sales'] },
-    { name: 'Reportes', icon: BarChart2, path: '/reports', roles: ['Admin'] },
-    { name: 'Ajustes', icon: Settings, path: '/settings', roles: ['Admin'] },
+    { name: 'Dashboard', icon: LayoutDashboard, path: '/', permission: 'view_dashboard' },
+    { name: 'Agenda', icon: Calendar, path: '/calendar', permission: 'view_calendar' }, // New
+    { name: 'Finanzas', icon: Wallet, path: '/finance', permission: 'view_finance' },
+    { name: 'Ventas', icon: ShoppingBag, path: '/sales', permission: 'view_sales' },
+    { name: 'Cotizaciones', icon: FileText, path: '/quotes', permission: 'view_quotes' },
+    { name: 'Proyectos', icon: Briefcase, path: '/projects', permission: 'view_projects' },
+    { name: 'Catálogo', icon: Package, path: '/services', permission: 'view_catalog' },
+    { name: 'Insumos', icon: Boxes, path: '/inventory', permission: 'view_inventory' }, 
+    { name: 'Clientes', icon: Users, path: '/clients', permission: 'view_clients' },
+    { name: 'Comunicaciones', icon: MessageSquare, path: '/communications', permission: 'view_communications' },
+    { name: 'Reportes', icon: BarChart2, path: '/reports', permission: 'view_reports' },
+    { name: 'Ajustes', icon: Settings, path: '/settings', permission: 'manage_settings' },
   ];
 
-  const navItems = allNavItems.filter(item => user && item.roles.includes(user.role));
+  const navItems = allNavItems.filter(item => hasPermission(item.permission));
 
   return (
     <div className="flex flex-col h-full bg-white border-r border-gray-200">
-      <div className="flex items-center h-20 px-6 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-           <div className="w-9 h-9 bg-brand-900 rounded-xl flex items-center justify-center text-white shadow-lg shadow-brand-900/20 flex-shrink-0">
-             <PenTool size={18} />
-           </div>
-           <div>
-             <span className="text-lg font-bold text-brand-900 tracking-tight block leading-none">Bráma</span>
-             <span className="text-[9px] text-gray-500 uppercase tracking-[0.2em] font-bold">Studio</span>
-           </div>
-        </div>
+      <div className="flex items-center justify-center h-24 px-6 border-b border-gray-100">
+        {logoUrl ? (
+            <img src={logoUrl} alt="Logo" className="max-h-16 w-auto object-contain" />
+        ) : (
+            <div className="flex items-center gap-3">
+               <div className="w-9 h-9 bg-brand-900 rounded-xl flex items-center justify-center text-white shadow-lg shadow-brand-900/20 flex-shrink-0">
+                 <PenTool size={18} />
+               </div>
+               <div>
+                 <span className="text-lg font-bold text-brand-900 tracking-tight block leading-none">Bráma</span>
+                 <span className="text-[9px] text-gray-500 uppercase tracking-[0.2em] font-bold">Studio</span>
+               </div>
+            </div>
+        )}
       </div>
 
       <div className="flex-1 flex flex-col overflow-y-auto py-6">

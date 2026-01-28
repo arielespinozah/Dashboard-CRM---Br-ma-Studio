@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileText, Search, Plus, Trash2, X, Edit3, Save, Package, Download, RefreshCw, Share2, Copy, ExternalLink, Link as LinkIcon } from 'lucide-react';
+import { FileText, Search, Plus, Trash2, X, Edit3, Save, Package, Download, RefreshCw, Share2, Copy, ExternalLink, Link as LinkIcon, DollarSign, Percent, Printer } from 'lucide-react';
 import { Quote, QuoteItem, AppSettings, Client, InventoryItem, User } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -50,7 +50,7 @@ export const Quotations = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingQuote, setViewingQuote] = useState<Quote | null>(null);
   const [pdfPreview, setPdfPreview] = useState<Quote | null>(null);
-  const [shareQuote, setShareQuote] = useState<Quote | null>(null); // For Share Modal
+  const [shareQuote, setShareQuote] = useState<Quote | null>(null);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   
   // Data State
@@ -63,11 +63,9 @@ export const Quotations = () => {
   const [isCatalogModalOpen, setIsCatalogModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   
-  // Client Modal State for Creation
   const [clientSearchMode, setClientSearchMode] = useState(true);
   const [newClientName, setNewClientName] = useState('');
   
-  // Catalog State
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogTab, setCatalogTab] = useState<'All' | 'Service' | 'Product'>('All');
   const [catalogCategory, setCatalogCategory] = useState<string>('All');
@@ -75,7 +73,6 @@ export const Quotations = () => {
   const [taxEnabled, setTaxEnabled] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
-  // Sync quotes to Firestore
   const saveQuotes = async (newQuotes: Quote[]) => {
       setQuotes(newQuotes);
       localStorage.setItem('crm_quotes', JSON.stringify(newQuotes));
@@ -84,11 +81,21 @@ export const Quotations = () => {
       } catch(e) {}
   };
 
-  // Load settings & data (Robust Sync)
   useEffect(() => {
       const fetchData = async () => {
+          // Load Settings from LS first
           const savedSettings = localStorage.getItem('crm_settings');
           if (savedSettings) setSettings({ ...defaultSettings, ...JSON.parse(savedSettings) });
+
+          // Attempt cloud sync for settings
+          try {
+              const sDoc = await getDoc(doc(db, 'crm_data', 'settings'));
+              if (sDoc.exists()) {
+                  const cloudSettings = { ...defaultSettings, ...sDoc.data() };
+                  setSettings(cloudSettings);
+                  localStorage.setItem('crm_settings', JSON.stringify(cloudSettings));
+              }
+          } catch(e) {}
 
           let localClients = localStorage.getItem('crm_clients');
           if (localClients) setAvailableClients(JSON.parse(localClients));
@@ -132,7 +139,6 @@ export const Quotations = () => {
       fetchData();
   }, []);
 
-  // Form State
   const [newQuote, setNewQuote] = useState<Partial<Quote>>({
       clientName: '',
       clientEmail: '', 
@@ -141,17 +147,19 @@ export const Quotations = () => {
       status: 'Draft',
       items: [],
       subtotal: 0,
+      discount: 0,
       tax: 0,
       total: 0
   });
 
-  // Recalculate totals
   useEffect(() => {
       const sub = newQuote.items?.reduce((acc, item) => acc + item.total, 0) || 0;
-      const tax = taxEnabled ? sub * (settings.taxRate / 100) : 0;
-      const total = sub + tax;
+      const discountAmount = sub * ((newQuote.discount || 0) / 100);
+      const taxableAmount = sub - discountAmount;
+      const tax = taxEnabled ? taxableAmount * (settings.taxRate / 100) : 0;
+      const total = taxableAmount + tax;
       setNewQuote(prev => ({ ...prev, subtotal: sub, tax, total }));
-  }, [newQuote.items, taxEnabled, settings.taxRate]);
+  }, [newQuote.items, taxEnabled, settings.taxRate, newQuote.discount]);
 
   const addManualItem = () => {
       const newItem: QuoteItem = {
@@ -164,13 +172,14 @@ export const Quotations = () => {
       setNewQuote(prev => ({ ...prev, items: [...(prev.items || []), newItem] }));
   };
 
-  const addItemFromCatalog = (item: InventoryItem) => {
+  const addItemFromCatalog = (item: InventoryItem, selectedPrice?: number) => {
+      const priceToUse = selectedPrice !== undefined ? selectedPrice : item.price;
       const newItem: QuoteItem = {
           id: Math.random().toString(36).substr(2, 9),
           description: item.name,
           quantity: 1,
-          unitPrice: item.price,
-          total: item.price
+          unitPrice: priceToUse,
+          total: priceToUse
       };
       setNewQuote(prev => ({ ...prev, items: [...(prev.items || []), newItem] }));
       setIsCatalogModalOpen(false);
@@ -266,23 +275,34 @@ export const Quotations = () => {
       setIsModalOpen(false);
   };
 
-  // --- PDF & SHARE LOGIC ---
-  const preparePDFDownload = (quote: Quote) => {
-      setPdfPreview(quote);
-      // Wait for DOM render
-      setTimeout(() => {
-          if (printRef.current) {
-              html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false }).then(canvas => {
-                  const imgData = canvas.toDataURL('image/png');
-                  const pdf = new jsPDF('p', 'mm', 'a4');
-                  const pdfWidth = pdf.internal.pageSize.getWidth();
-                  const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                  pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                  pdf.save(`Cotizacion_${quote.id}.pdf`);
-                  setPdfPreview(null);
-              });
-          }
-      }, 500);
+  // --- PDF & PRINT LOGIC ---
+  const handleDownloadPDF = () => {
+      if (printRef.current && pdfPreview) {
+          html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false }).then(canvas => {
+              const imgData = canvas.toDataURL('image/png');
+              const pdf = new jsPDF('p', 'mm', 'a4');
+              const pdfWidth = pdf.internal.pageSize.getWidth();
+              const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+              pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+              pdf.save(`Cotizacion_${pdfPreview.id}.pdf`);
+          });
+      }
+  };
+  
+  // Direct Print Logic
+  const handleDirectPrint = () => {
+      if (printRef.current) {
+          html2canvas(printRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false }).then(canvas => {
+              const imgData = canvas.toDataURL('image/png');
+              const pdf = new jsPDF('p', 'mm', 'a4');
+              const pdfWidth = pdf.internal.pageSize.getWidth();
+              const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+              pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+              
+              const pdfBlob = pdf.output('bloburl');
+              window.open(pdfBlob, '_blank');
+          });
+      }
   };
 
   const openShareModal = (quote: Quote) => {
@@ -292,7 +312,6 @@ export const Quotations = () => {
 
   const handleShareWhatsApp = () => {
       if (!shareQuote) return;
-      // Simulated Link
       const link = `https://brama.studio/q/${shareQuote.id.toLowerCase()}`;
       const text = `Hola ${shareQuote.clientName}, adjunto la Cotización *${shareQuote.id}*. Puedes verla y descargarla aquí: ${link}`;
       const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
@@ -306,7 +325,6 @@ export const Quotations = () => {
       alert('Enlace copiado al portapapeles');
   };
 
-  // Helper to find client details
   const getClientDetails = (name: string) => {
       return availableClients.find(c => c.name === name);
   };
@@ -330,11 +348,12 @@ export const Quotations = () => {
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Cotizaciones</h1>
           <p className="text-sm text-gray-500">Administra tus propuestas comerciales</p>
         </div>
-        <button onClick={() => { setEditingId(null); setNewQuote({ clientName: '', date: new Date().toISOString().split('T')[0], validUntil: new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0], status: 'Draft', items: [], subtotal: 0, tax: 0, total: 0 }); setTaxEnabled(false); setIsModalOpen(true); }} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg active:scale-95">
+        <button onClick={() => { setEditingId(null); setNewQuote({ clientName: '', date: new Date().toISOString().split('T')[0], validUntil: new Date(Date.now() + 15 * 86400000).toISOString().split('T')[0], status: 'Draft', items: [], subtotal: 0, discount: 0, tax: 0, total: 0 }); setTaxEnabled(false); setIsModalOpen(true); }} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg active:scale-95">
             <Plus size={16} /> Nueva Cotización
         </button>
       </div>
 
+      {/* Quote List */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <table className="w-full text-left border-collapse">
             <thead className="bg-gray-50/50 border-b border-gray-100">
@@ -347,13 +366,13 @@ export const Quotations = () => {
             </thead>
             <tbody className="divide-y divide-gray-50">
                 {quotes.map((quote) => (
-                <tr key={quote.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => preparePDFDownload(quote)}>
+                <tr key={quote.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => { setPdfPreview(quote); }}>
                     <td className="px-6 py-4 text-sm font-medium text-brand-900">{quote.id}</td>
                     <td className="px-6 py-4 text-sm text-gray-900">{quote.clientName}</td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(quote.total, settings)}</td>
                     <td className="px-6 py-4 text-right flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => openShareModal(quote)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="Compartir"><Share2 size={18}/></button>
-                        <button onClick={() => preparePDFDownload(quote)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg" title="Descargar PDF"><Download size={18} /></button>
+                        <button onClick={() => { setPdfPreview(quote); }} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg" title="Ver/Imprimir"><Printer size={18} /></button>
                         <button onClick={() => openEdit(quote)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Editar"><Edit3 size={18} /></button>
                         {currentUser?.role === 'Admin' && (
                             <button onClick={() => handleDelete(quote.id)} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Eliminar"><Trash2 size={18} /></button>
@@ -408,15 +427,49 @@ export const Quotations = () => {
                     <button type="button" onClick={addManualItem} className="mt-3 text-xs text-blue-600 font-bold hover:underline flex items-center gap-1"><Plus size={12}/> Agregar Fila Manual</button>
                 </div>
 
-                <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-200">
-                    <label className="flex items-center gap-3 cursor-pointer select-none">
-                        <button type="button" onClick={() => setTaxEnabled(!taxEnabled)} className={`w-9 h-5 rounded-full transition-colors flex items-center px-0.5 ${taxEnabled ? 'bg-brand-900' : 'bg-gray-300'}`}>
-                            <div className={`w-4 h-4 bg-white rounded-full shadow transform transition-transform ${taxEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
-                        </button>
-                        <span className="text-sm font-bold text-gray-700">Incluir {settings.taxName} ({settings.taxRate}%)</span>
-                    </label>
-                    <div className="text-right"><span className="text-xl font-bold text-brand-900">{formatCurrency(newQuote.total || 0, settings)}</span></div>
+                <div className="flex flex-col gap-3 bg-gray-50 p-4 rounded-xl border border-gray-200 w-full md:w-1/2 ml-auto">
+                    <div className="flex justify-between items-center pb-2 border-b border-gray-200/60">
+                        <span className="text-sm font-medium text-gray-600">Subtotal</span>
+                        <span className="text-sm font-bold text-gray-900">{formatCurrency(newQuote.subtotal || 0, settings)}</span>
+                    </div>
+                    
+                    {/* Discount Row */}
+                    <div className="flex justify-between items-center pb-2 border-b border-gray-200/60">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-600">Descuento</span>
+                            <div className="flex items-center bg-white px-2 py-0.5 rounded border border-gray-300">
+                                <input 
+                                    type="number" 
+                                    className="w-10 text-right text-xs outline-none font-bold text-gray-900 bg-white" 
+                                    value={newQuote.discount || ''} 
+                                    onChange={(e) => setNewQuote({...newQuote, discount: Number(e.target.value)})}
+                                    placeholder="0"
+                                />
+                                <span className="text-xs font-bold text-gray-500">%</span>
+                            </div>
+                        </div>
+                        <span className="text-sm font-medium text-red-500">
+                            - {formatCurrency((newQuote.subtotal || 0) * ((newQuote.discount || 0)/100), settings)}
+                        </span>
+                    </div>
+
+                    {/* Tax Row */}
+                    <div className="flex justify-between items-center pb-2 border-b border-gray-200/60">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <button type="button" onClick={() => setTaxEnabled(!taxEnabled)} className={`w-8 h-4 rounded-full transition-colors flex items-center px-0.5 ${taxEnabled ? 'bg-brand-900' : 'bg-gray-300'}`}>
+                                <div className={`w-3 h-3 bg-white rounded-full shadow transform transition-transform ${taxEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                            </button>
+                            <span className="text-sm font-medium text-gray-600">{settings.taxName} ({settings.taxRate}%)</span>
+                        </label>
+                        <span className="text-sm font-medium text-gray-900">{formatCurrency(newQuote.tax || 0, settings)}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2">
+                        <span className="text-lg font-bold text-gray-900">Total</span>
+                        <span className="text-2xl font-bold text-brand-900">{formatCurrency(newQuote.total || 0, settings)}</span>
+                    </div>
                 </div>
+
                 <div className="flex justify-end gap-2">
                     <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 border border-gray-300 rounded-xl hover:bg-gray-50 text-gray-700 bg-white font-medium">Cancelar</button>
                     <button type="submit" className="px-6 py-2 bg-brand-900 text-white rounded-xl hover:bg-brand-800 font-bold shadow-lg">Guardar</button>
@@ -426,121 +479,163 @@ export const Quotations = () => {
         </div>
       )}
 
+      {/* Share Modal */}
+      {isShareModalOpen && shareQuote && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 relative animate-in zoom-in duration-200">
+                  <button onClick={() => setIsShareModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button>
+                  <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2"><Share2 size={20} className="text-brand-900"/> Compartir Cotización</h3>
+                  
+                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 mb-6 text-center">
+                      <div className="w-12 h-12 bg-white rounded-full mx-auto mb-3 flex items-center justify-center shadow-sm text-brand-900 border border-gray-100">
+                          <FileText size={24} />
+                      </div>
+                      <p className="font-bold text-gray-900">{shareQuote.id}</p>
+                      <p className="text-sm text-gray-500 mb-3">{shareQuote.clientName}</p>
+                      
+                      <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-2">
+                          <LinkIcon size={14} className="text-gray-400"/>
+                          <input readOnly value={`brama.studio/q/${shareQuote.id.toLowerCase()}`} className="text-xs flex-1 bg-transparent outline-none text-gray-600 font-mono"/>
+                      </div>
+                  </div>
+
+                  <div className="space-y-3">
+                      <button onClick={handleShareWhatsApp} className="w-full py-3 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
+                          Enviar por WhatsApp
+                      </button>
+                      <button onClick={handleCopyLink} className="w-full py-3 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
+                          <Copy size={18}/> Copiar Enlace
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* PDF Generation View */}
       {pdfPreview && (
-         <div className="fixed top-0 left-[-9999px]">
-            <div ref={printRef} className="w-[210mm] min-h-[297mm] bg-white text-slate-800 relative font-sans leading-normal">
-                {/* PDF HEADER */}
-                <div className="p-10 flex justify-between items-center" style={{ backgroundColor: settings.pdfHeaderColor || settings.primaryColor || '#162836' }}>
-                    <div className="flex items-center">
-                         {settings.logoUrl ? (
-                             <img src={settings.logoUrl} style={{ maxHeight: '80px', width: 'auto' }} alt="Logo" />
-                         ) : (
-                             <h1 className="text-4xl font-bold text-white tracking-widest uppercase">{settings.companyName}</h1>
-                         )}
-                    </div>
-                    <div className="text-right text-white">
-                        <h2 className="text-5xl font-bold tracking-tight mb-2 opacity-90 leading-none">COTIZACIÓN</h2>
-                        <div className="text-xs font-bold opacity-80 space-y-1 uppercase tracking-wide flex flex-col items-end">
-                            <div className="flex justify-end gap-6 border-b border-white/20 pb-1 mb-1 w-full"><span className="opacity-70 text-right w-24">NRO</span> <span className="font-mono text-sm w-32">{pdfPreview.id.replace('COT-', '')}</span></div>
-                            <div className="flex justify-end gap-6"><span className="opacity-70 text-right w-24">EMISIÓN</span> <span className="w-32 whitespace-nowrap">{new Date(pdfPreview.date).toLocaleDateString()} {new Date().toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit', hour12: true})}</span></div>
-                            <div className="flex justify-end gap-6"><span className="opacity-70 text-right w-24">VÁLIDO</span> <span className="w-32">{new Date(pdfPreview.validUntil).toLocaleDateString()}</span></div>
+         <div className="fixed z-[100] inset-0 bg-black/80 flex items-center justify-center p-4">
+             <div className="relative h-full flex flex-col items-center">
+                 <div className="mb-4 flex gap-4">
+                     <button onClick={handleDownloadPDF} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition-colors"><Download size={18}/> Descargar PDF</button>
+                     <button onClick={handleDirectPrint} className="bg-white px-4 py-2 rounded-lg font-bold text-brand-900 hover:bg-gray-100 flex items-center gap-2"><Printer size={18}/> Imprimir Ahora</button>
+                     <button onClick={() => setPdfPreview(null)} className="bg-red-500 px-4 py-2 rounded-lg font-bold text-white hover:bg-red-600"><X size={18}/></button>
+                 </div>
+                 
+                <div ref={printRef} className="w-[210mm] min-h-[297mm] bg-white text-slate-800 relative font-sans leading-normal shadow-2xl overflow-y-auto max-h-[85vh]">
+                    {/* PDF HEADER */}
+                    <div className="p-10 flex justify-between items-center" style={{ backgroundColor: settings.pdfHeaderColor || settings.primaryColor || '#162836' }}>
+                        <div className="flex items-center">
+                             {settings.logoUrl ? (
+                                 <img src={settings.logoUrl} style={{ maxHeight: '80px', width: 'auto' }} alt="Logo" />
+                             ) : (
+                                 <h1 className="text-4xl font-bold text-white tracking-widest uppercase">{settings.companyName}</h1>
+                             )}
                         </div>
-                    </div>
-                </div>
-
-                <div className="px-12 pt-12">
-                    {/* INFO ROW */}
-                    <div className="flex justify-between mb-8 text-sm border-b border-gray-100 pb-8">
-                        <div className="w-[45%]">
-                            <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">Cotizado a:</p>
-                            <h3 className="text-xl font-bold text-gray-900 mb-1 leading-tight">{pdfPreview.clientName}</h3>
-                            {(() => {
-                                const client = getClientDetails(pdfPreview.clientName);
-                                return (
-                                    <div className="text-gray-500 text-xs mt-1 space-y-0.5">
-                                        {client?.company && <div className="font-medium text-gray-600">{client.company}</div>}
-                                        {client?.phone && <div>{client.phone}</div>}
-                                        {pdfPreview.clientEmail && <div>{pdfPreview.clientEmail}</div>}
-                                    </div>
-                                );
-                            })()}
-                        </div>
-                        <div className="w-[45%] text-right">
-                            <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">De:</p>
-                            <div className="text-gray-600 text-xs leading-relaxed whitespace-pre-wrap font-medium">
-                                {settings.pdfSenderInfo || `${settings.companyName}\n${settings.address}\n${settings.phone}`}
+                        <div className="text-right text-white">
+                            <h2 className="text-5xl font-bold tracking-tight mb-2 opacity-90 leading-none">COTIZACIÓN</h2>
+                            <div className="text-xs font-bold opacity-80 space-y-1 uppercase tracking-wide flex flex-col items-end">
+                                <div className="flex justify-end gap-6 border-b border-white/20 pb-1 mb-1 w-full"><span className="opacity-70 text-right w-24">NRO</span> <span className="font-mono text-sm w-32">{pdfPreview.id.replace('COT-', '')}</span></div>
+                                <div className="flex justify-end gap-6"><span className="opacity-70 text-right w-24">EMISIÓN</span> <span className="w-32 whitespace-nowrap">{new Date(pdfPreview.date).toLocaleDateString()} {new Date().toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit', hour12: true})}</span></div>
+                                <div className="flex justify-end gap-6"><span className="opacity-70 text-right w-24">VÁLIDO</span> <span className="w-32">{new Date(pdfPreview.validUntil).toLocaleDateString()}</span></div>
                             </div>
                         </div>
                     </div>
 
-                    {/* TABLE */}
-                    <div className="mb-10">
-                        <div className="bg-gray-50 flex px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-500 rounded-md mb-2">
-                            <div className="flex-1">Descripción</div>
-                            <div className="w-20 text-center">Cant.</div>
-                            <div className="w-28 text-right">P. Unit</div>
-                            <div className="w-28 text-right">Total</div>
-                        </div>
-                        <div className="divide-y divide-gray-100">
-                            {pdfPreview.items.map((item, idx) => (
-                                <div key={idx} className="flex px-4 py-3 text-sm items-center">
-                                    <div className="flex-1 font-medium text-gray-800 leading-snug">{item.description}</div>
-                                    <div className="w-20 text-center text-gray-500">{item.quantity}</div>
-                                    <div className="w-28 text-right text-gray-500">{formatCurrency(item.unitPrice, settings)}</div>
-                                    <div className="w-28 text-right font-bold text-gray-900">{formatCurrency(item.total, settings)}</div>
-                                </div>
-                            ))}
-                        </div>
-                        <div className="border-t border-gray-200 mt-2"></div>
-                    </div>
-
-                    {/* FOOTER SECTION: Totals, Terms, Signature */}
-                    <div className="flex justify-between items-start">
-                        <div className="w-[55%] pr-8">
-                            <div className="mb-6">
-                                <h4 className="font-bold text-gray-900 mb-3 text-[11px] uppercase tracking-wide">Métodos de Pago</h4>
-                                <div className="flex gap-5 items-start">
-                                    {settings.qrCodeUrl && (
-                                        <div className="flex-shrink-0">
-                                            <img src={settings.qrCodeUrl} className="h-24 w-24 object-contain mix-blend-multiply" alt="QR" />
+                    <div className="px-12 pt-12">
+                        {/* INFO ROW */}
+                        <div className="flex justify-between mb-8 text-sm border-b border-gray-100 pb-8">
+                            <div className="w-[45%]">
+                                <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">Cotizado a:</p>
+                                <h3 className="text-xl font-bold text-gray-900 mb-1 leading-tight">{pdfPreview.clientName}</h3>
+                                {(() => {
+                                    const client = getClientDetails(pdfPreview.clientName);
+                                    return (
+                                        <div className="text-gray-500 text-xs mt-1 space-y-0.5">
+                                            {client?.company && <div className="font-medium text-gray-600">{client.company}</div>}
+                                            {client?.phone && <div>{client.phone}</div>}
+                                            {pdfPreview.clientEmail && <div>{pdfPreview.clientEmail}</div>}
                                         </div>
-                                    )}
-                                    <div className="flex-1 text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">
-                                        {settings.paymentInfo || 'Sin información bancaria configurada.'}
-                                    </div>
-                                </div>
+                                    );
+                                })()}
                             </div>
-                            
-                            <div>
-                                <h4 className="font-bold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">Términos y Condiciones</h4>
-                                <div className="text-[10px] text-gray-500 leading-relaxed whitespace-pre-wrap">
-                                    {settings.termsAndConditions || 'Sin términos definidos.'}
+                            <div className="w-[45%] text-right">
+                                <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">De:</p>
+                                <div className="text-gray-600 text-xs leading-relaxed whitespace-pre-wrap font-medium">
+                                    {settings.pdfSenderInfo || `${settings.companyName}\n${settings.address}\n${settings.phone}`}
                                 </div>
                             </div>
                         </div>
 
-                        <div className="w-[40%] flex flex-col items-end">
-                            <div className="w-full bg-gray-50 p-5 rounded-lg space-y-2 border border-gray-100 mb-8">
-                                <div className="flex justify-between text-sm text-gray-600 font-medium"><span>Subtotal</span><span>{formatCurrency(pdfPreview.subtotal, settings)}</span></div>
-                                {pdfPreview.tax > 0 && (<div className="flex justify-between text-sm text-gray-600 font-medium"><span>{settings.taxName} ({settings.taxRate}%)</span><span>{formatCurrency(pdfPreview.tax, settings)}</span></div>)}
-                                <div className="flex justify-between text-xl font-bold text-gray-900 border-t border-gray-200 pt-3 mt-1"><span>TOTAL</span><span>{formatCurrency(pdfPreview.total, settings)}</span></div>
+                        {/* TABLE */}
+                        <div className="mb-10">
+                            <div className="bg-gray-50 flex px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-500 rounded-md mb-2">
+                                <div className="flex-1">Descripción</div>
+                                <div className="w-20 text-center">Cant.</div>
+                                <div className="w-28 text-right">P. Unit</div>
+                                <div className="w-28 text-right">Total</div>
+                            </div>
+                            <div className="divide-y divide-gray-100">
+                                {pdfPreview.items.map((item, idx) => (
+                                    <div key={idx} className="flex px-4 py-3 text-sm items-center">
+                                        <div className="flex-1 font-medium text-gray-800 leading-snug">{item.description}</div>
+                                        <div className="w-20 text-center text-gray-500">{item.quantity}</div>
+                                        <div className="w-28 text-right text-gray-500">{formatCurrency(item.unitPrice, settings)}</div>
+                                        <div className="w-28 text-right font-bold text-gray-900">{formatCurrency(item.total, settings)}</div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="border-t border-gray-200 mt-2"></div>
+                        </div>
+
+                        {/* FOOTER SECTION: Totals, Terms, Signature */}
+                        <div className="flex justify-between items-start">
+                            <div className="w-[55%] pr-8">
+                                <div className="mb-6">
+                                    <h4 className="font-bold text-gray-900 mb-3 text-[11px] uppercase tracking-wide">Métodos de Pago</h4>
+                                    <div className="flex gap-5 items-start">
+                                        {settings.qrCodeUrl && (
+                                            <div className="flex-shrink-0">
+                                                <img src={settings.qrCodeUrl} className="h-24 w-24 object-contain mix-blend-multiply" alt="QR" />
+                                            </div>
+                                        )}
+                                        <div className="flex-1 text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">
+                                            {settings.paymentInfo || 'Sin información bancaria configurada.'}
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <h4 className="font-bold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">Términos y Condiciones</h4>
+                                    <div className="text-[10px] text-gray-500 leading-relaxed whitespace-pre-wrap">
+                                        {settings.termsAndConditions || 'Sin términos definidos.'}
+                                    </div>
+                                </div>
                             </div>
 
-                            <div className="text-center mt-4 w-full flex flex-col items-center">
-                                {settings.signatureUrl && (<img src={settings.signatureUrl} className="h-20 mb-[-15px] object-contain relative z-10" alt="Firma" />)}
-                                <div className="relative pt-2 px-8 border-t border-gray-400 min-w-[200px]">
-                                    <p className="text-sm font-bold text-gray-900">{settings.signatureName}</p>
-                                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{settings.signatureTitle}</p>
+                            <div className="w-[40%] flex flex-col items-end">
+                                <div className="w-full bg-gray-50 p-5 rounded-lg space-y-2 border border-gray-100 mb-8">
+                                    <div className="flex justify-between text-sm text-gray-600 font-medium"><span>Subtotal</span><span>{formatCurrency(pdfPreview.subtotal, settings)}</span></div>
+                                    {pdfPreview.discount > 0 && (<div className="flex justify-between text-sm text-gray-600 font-medium"><span>Descuento ({pdfPreview.discount}%)</span><span>-{formatCurrency(pdfPreview.subtotal * (pdfPreview.discount/100), settings)}</span></div>)}
+                                    {pdfPreview.tax > 0 && (<div className="flex justify-between text-sm text-gray-600 font-medium"><span>{settings.taxName} ({settings.taxRate}%)</span><span>{formatCurrency(pdfPreview.tax, settings)}</span></div>)}
+                                    <div className="flex justify-between text-xl font-bold text-gray-900 border-t border-gray-200 pt-3 mt-1"><span>TOTAL</span><span>{formatCurrency(pdfPreview.total, settings)}</span></div>
+                                </div>
+
+                                <div className="text-center mt-4 w-full flex flex-col items-center">
+                                    {settings.signatureUrl && (<img src={settings.signatureUrl} className="h-20 mb-[-15px] object-contain relative z-10" alt="Firma" />)}
+                                    <div className="relative pt-2 px-8 border-t border-gray-400 min-w-[200px]">
+                                        <p className="text-sm font-bold text-gray-900">{settings.signatureName}</p>
+                                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">{settings.signatureTitle}</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <div className="absolute bottom-0 left-0 w-full">
-                    <div className="bg-gray-100 text-center py-3 border-t border-gray-200">
-                        <p className="text-[10px] text-gray-500 tracking-wider font-medium uppercase">{settings.pdfFooterText || `${settings.website} • ${settings.address}`}</p>
+                    {/* FOOTER */}
+                    <div className="absolute bottom-0 left-0 w-full">
+                        <div className="bg-gray-100 text-center py-3 border-t border-gray-200">
+                            <p className="text-[10px] text-gray-500 tracking-wider font-medium uppercase">{settings.pdfFooterText || `${settings.website} • ${settings.address}`}</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -561,7 +656,7 @@ export const Quotations = () => {
                           <div className="p-4 border-b border-gray-100 flex gap-2">
                               <div className="relative flex-1">
                                   <Search className="absolute left-3 top-2.5 text-gray-400" size={18}/>
-                                  <input autoFocus type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand-500" onChange={(e) => setCatalogSearch(e.target.value)} />
+                                  <input autoFocus type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand-500 text-gray-900 bg-white" onChange={(e) => setCatalogSearch(e.target.value)} />
                               </div>
                               <button onClick={() => setClientSearchMode(false)} className="px-3 bg-brand-900 text-white rounded-xl text-sm font-bold hover:bg-brand-800 flex items-center gap-1"><Plus size={16}/> Nuevo</button>
                           </div>
@@ -639,18 +734,32 @@ export const Quotations = () => {
                       )}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {filteredCatalog.map(item => (
-                              <div key={item.id} onClick={() => addItemFromCatalog(item)} className="bg-white p-4 rounded-xl border border-gray-200 hover:border-brand-500 cursor-pointer shadow-sm hover:shadow-md transition-all group flex flex-col">
+                              <div key={item.id} className="bg-white p-4 rounded-xl border border-gray-200 hover:border-brand-500 cursor-pointer shadow-sm hover:shadow-md transition-all group flex flex-col">
                                   <div className="flex justify-between items-start mb-2">
                                       <span className="font-bold text-gray-900 text-base group-hover:text-brand-900 line-clamp-1">{item.name}</span>
                                       <span className="font-bold text-brand-600 bg-brand-50 px-2 py-1 rounded text-sm">{formatCurrency(item.price, settings)}</span>
                                   </div>
                                   <p className="text-xs text-gray-500 mb-3 line-clamp-2 h-8">{item.description || 'Sin descripción'}</p>
-                                  <div className="mt-auto flex justify-between items-center border-t border-gray-100 pt-2">
-                                      <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-medium border border-gray-200">{item.category}</span>
-                                      {item.type === 'Product' && (
-                                          <span className={`text-[10px] font-bold ${item.quantity > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                                              Stock: {item.quantity}
-                                          </span>
+                                  
+                                  {/* Pricing Tiers Selection */}
+                                  <div className="mt-auto border-t border-gray-100 pt-2 space-y-1">
+                                      <button onClick={() => addItemFromCatalog(item)} className="w-full text-xs bg-gray-50 hover:bg-gray-100 text-gray-700 py-1.5 rounded flex justify-between px-2 font-medium">
+                                          <span>Unitario</span> <span>{formatCurrency(item.price, settings)}</span>
+                                      </button>
+                                      {item.priceDozen && item.priceDozen > 0 && (
+                                          <button onClick={() => addItemFromCatalog(item, item.priceDozen)} className="w-full text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded flex justify-between px-2 font-medium">
+                                              <span>Precio A</span> <span>{formatCurrency(item.priceDozen, settings)}</span>
+                                          </button>
+                                      )}
+                                      {item.priceBox && item.priceBox > 0 && (
+                                          <button onClick={() => addItemFromCatalog(item, item.priceBox)} className="w-full text-xs bg-orange-50 hover:bg-orange-100 text-orange-700 py-1.5 rounded flex justify-between px-2 font-medium">
+                                              <span>Precio B</span> <span>{formatCurrency(item.priceBox, settings)}</span>
+                                          </button>
+                                      )}
+                                      {item.priceWholesale && item.priceWholesale > 0 && (
+                                          <button onClick={() => addItemFromCatalog(item, item.priceWholesale)} className="w-full text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 py-1.5 rounded flex justify-between px-2 font-medium">
+                                              <span>Precio C</span> <span>{formatCurrency(item.priceWholesale, settings)}</span>
+                                          </button>
                                       )}
                                   </div>
                               </div>

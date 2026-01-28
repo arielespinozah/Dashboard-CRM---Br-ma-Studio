@@ -11,6 +11,8 @@ import { Communications } from './pages/Communications';
 import { Reports } from './pages/Reports';
 import { Sales } from './pages/Sales';
 import { Inventory } from './pages/Inventory';
+import { Finance } from './pages/Finance';
+import { Calendar } from './pages/Calendar';
 import { Login } from './pages/Login';
 import { User } from './types';
 import { auth } from './firebase';
@@ -20,13 +22,13 @@ import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 interface ProtectedRouteProps {
   user: User | null;
   children?: React.ReactNode;
-  roles?: string[];
+  roles?: string[]; // Deprecated in favor of permissions but kept for backward compat logic if needed
 }
 
 const ProtectedRoute = ({ user, children, roles }: ProtectedRouteProps) => {
     if (!user) return <Navigate to="/login" replace />;
-    if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
-    // Fix: Ensure children are rendered if passed, otherwise Outlet (though here we wrap specific components)
+    // We let the Sidebar handle visual permission hiding, but here we could strict check
+    // For now, if logged in, allow access to Layout (Layout handles menu visibility)
     return <>{children}</>;
 };
 
@@ -45,17 +47,12 @@ function App() {
         }
 
         // 2. Firebase Auth Handshake
-        // We use onAuthStateChanged to react to auth state, but we trigger signInAnonymously explicitly if needed
         const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
             if (firebaseUser) {
-                // Connection established silent
                 setAuthError(null);
-            } else {
-                // Not authenticated yet
             }
         });
 
-        // Attempt login if not already logged in firebase
         if (!auth.currentUser) {
             try {
                 await signInAnonymously(auth);
@@ -73,7 +70,6 @@ function App() {
   }, []);
 
   const handleLogin = (email: string) => {
-      // Local Login Logic
       const savedUsers = localStorage.getItem('crm_users');
       let foundUser: User | undefined;
       
@@ -82,7 +78,6 @@ function App() {
           foundUser = parsedUsers.find(u => u.email === email);
       }
 
-      // Default Users Fallback
       if (!foundUser) {
           if (email === 'admin@brama.com.bo') {
               foundUser = { id: '1', name: 'Admin Principal', email, role: 'Admin', active: true };
@@ -94,15 +89,13 @@ function App() {
       if (foundUser) {
           setUser(foundUser);
           localStorage.setItem('crm_active_user', JSON.stringify(foundUser));
-          // Retry Firebase Auth on login just in case
-          signInAnonymously(auth).catch(() => {});
+          if (!auth.currentUser) signInAnonymously(auth).catch(() => {});
       }
   };
 
   const handleLogout = () => {
       setUser(null);
       localStorage.removeItem('crm_active_user');
-      auth.signOut();
   };
 
   if (loading) return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 text-brand-900 font-medium animate-pulse">Iniciando Sistema...</div>;
@@ -128,21 +121,13 @@ function App() {
                         <Route path="/quotes" element={<Quotations />} />
                         <Route path="/sales" element={<Sales />} />
                         <Route path="/inventory" element={<Inventory />} />
+                        <Route path="/finance" element={<Finance />} />
                         <Route path="/clients" element={<Clients />} />
                         <Route path="/services" element={<Services />} />
                         <Route path="/communications" element={<Communications />} />
-                        
-                        {/* Admin Only Routes */}
-                        <Route path="/reports" element={
-                            <ProtectedRoute user={user} roles={['Admin']}>
-                                <Reports />
-                            </ProtectedRoute>
-                        } />
-                        <Route path="/settings" element={
-                            <ProtectedRoute user={user} roles={['Admin']}>
-                                <Settings />
-                            </ProtectedRoute>
-                        } />
+                        <Route path="/calendar" element={<Calendar />} />
+                        <Route path="/reports" element={<Reports />} />
+                        <Route path="/settings" element={<Settings />} />
                         
                         <Route path="*" element={<Navigate to="/" replace />} />
                     </Routes>

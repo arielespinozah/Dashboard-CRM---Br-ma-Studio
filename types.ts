@@ -62,6 +62,7 @@ export interface Quote {
   validUntil: string;
   items: QuoteItem[];
   subtotal: number;
+  discount: number; // Percentage
   tax: number;
   total: number;
   status: 'Draft' | 'Sent' | 'Approved' | 'Paid' | 'Rejected';
@@ -76,6 +77,7 @@ export interface Sale {
   date: string;
   items: QuoteItem[];
   subtotal: number;
+  discount?: number; // Added discount field
   tax: number;
   total: number;
   amountPaid: number;
@@ -92,7 +94,10 @@ export interface InventoryItem {
   category: string;
   quantity: number;
   minStock: number;
-  price: number;
+  price: number; // Unit Price
+  priceDozen?: number; // Price per unit when buying dozen
+  priceBox?: number; // Price per unit when buying 4 dozen
+  priceWholesale?: number; // Price per unit for wholesale
   status: 'In Stock' | 'Low Stock' | 'Critical';
   lastUpdated: string;
   type?: 'Product' | 'Service';
@@ -142,7 +147,8 @@ export interface User {
   avatar?: string;
   active: boolean;
   password?: string;
-  permissions?: string[]; // New: Granular permissions
+  permissions?: string[]; 
+  // Permissions List: 'view_dashboard', 'view_finance', 'view_sales', 'view_quotes', 'view_projects', 'view_inventory', 'view_clients', 'view_calendar', 'view_reports', 'manage_settings'
 }
 
 export interface Category {
@@ -166,6 +172,41 @@ export interface ChatMessage {
   text: string;
   sender: 'me' | 'client';
   timestamp: string;
+}
+
+// Finance Types
+export interface CashTransaction {
+    id: string;
+    description: string;
+    amount: number;
+    type: 'Income' | 'Expense';
+    category: 'Sale' | 'Supply' | 'Service' | 'Other';
+    date: string;
+    user: string;
+}
+
+export interface CashShift {
+    id: string;
+    openDate: string;
+    closeDate?: string;
+    openedBy: string;
+    initialAmount: number;
+    finalAmount?: number;
+    systemCalculatedAmount?: number;
+    difference?: number;
+    status: 'Open' | 'Closed';
+    transactions: CashTransaction[];
+    notes?: string;
+}
+
+// Calendar Types
+export interface CalendarEvent {
+    id: string;
+    title: string;
+    date: string; // ISO Date String YYYY-MM-DD
+    type: 'Project' | 'Meeting' | 'Reminder' | 'Other';
+    description?: string;
+    time?: string;
 }
 
 export interface AuthContextType {

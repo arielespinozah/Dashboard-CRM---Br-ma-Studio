@@ -3,6 +3,8 @@ import { DollarSign, Users, Briefcase, TrendingUp, Plus, ShoppingBag, Share2, Cl
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { AppSettings, Sale, Client, Project, Status } from '../types';
+import { db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 const KPICard = ({ title, value, icon: Icon, trend, positive, colorClass }: any) => (
   <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
@@ -39,54 +41,67 @@ export const Dashboard = () => {
       const saved = localStorage.getItem('crm_settings');
       if (saved) setSettings(JSON.parse(saved));
 
-      // 2. Load Sales for Stats & Chart
-      const savedSales = localStorage.getItem('crm_sales_history');
-      if (savedSales) {
-          const sales: Sale[] = JSON.parse(savedSales);
-          setRecentSales(sales.slice(0, 5)); // Top 5
-          setTotalSalesCount(sales.length);
-          
-          // Calculate Total Income (Paid Only)
-          const income = sales.reduce((acc, sale) => acc + (sale.paymentStatus === 'Paid' ? sale.total : sale.amountPaid || 0), 0);
-          setTotalIncome(income);
-
-          // Prepare Chart Data (Group by Month)
-          const monthMap = new Map<string, number>();
-          // Initialize last 6 months
-          for(let i=5; i>=0; i--) {
-              const d = new Date();
-              d.setMonth(d.getMonth() - i);
-              const key = d.toLocaleString('es-BO', { month: 'short' });
-              monthMap.set(key, 0);
-          }
-
-          sales.forEach(sale => {
-              const d = new Date(sale.date);
-              const key = d.toLocaleString('es-BO', { month: 'short' });
-              if (monthMap.has(key)) {
-                  monthMap.set(key, monthMap.get(key)! + sale.total);
+      const fetchDashboardData = async () => {
+          try {
+              // Load Sales
+              const salesDoc = await getDoc(doc(db, 'crm_data', 'sales_history'));
+              let salesList: Sale[] = [];
+              if (salesDoc.exists()) {
+                  salesList = salesDoc.data().list;
+                  localStorage.setItem('crm_sales_history', JSON.stringify(salesList));
+              } else {
+                  const s = localStorage.getItem('crm_sales_history');
+                  if (s) salesList = JSON.parse(s);
               }
-          });
 
-          const cData = Array.from(monthMap).map(([name, income]) => ({ name, income }));
-          setChartData(cData);
-      }
+              if (salesList.length > 0) {
+                  setRecentSales(salesList.slice(0, 5));
+                  setTotalSalesCount(salesList.length);
+                  
+                  const income = salesList.reduce((acc, sale) => acc + (sale.paymentStatus === 'Paid' ? sale.total : sale.amountPaid || 0), 0);
+                  setTotalIncome(income);
 
-      // 3. Load Clients
-      const savedClients = localStorage.getItem('crm_clients');
-      if (savedClients) {
-          const clients: Client[] = JSON.parse(savedClients);
-          setTotalClients(clients.length);
-      }
+                  const monthMap = new Map<string, number>();
+                  for(let i=5; i>=0; i--) {
+                      const d = new Date();
+                      d.setMonth(d.getMonth() - i);
+                      const key = d.toLocaleString('es-BO', { month: 'short' });
+                      monthMap.set(key, 0);
+                  }
 
-      // 4. Load Projects
-      const savedProjects = localStorage.getItem('crm_projects');
-      if (savedProjects) {
-          const projects: Project[] = JSON.parse(savedProjects);
-          const active = projects.filter(p => p.status !== Status.COMPLETED).length;
-          setActiveProjects(active);
-      }
+                  salesList.forEach(sale => {
+                      const d = new Date(sale.date);
+                      const key = d.toLocaleString('es-BO', { month: 'short' });
+                      if (monthMap.has(key)) {
+                          monthMap.set(key, monthMap.get(key)! + sale.total);
+                      }
+                  });
 
+                  setChartData(Array.from(monthMap).map(([name, income]) => ({ name, income })));
+              }
+
+              // Load Clients
+              const clientDoc = await getDoc(doc(db, 'crm_data', 'clients'));
+              if(clientDoc.exists()) setTotalClients(clientDoc.data().list.length);
+              else {
+                  const c = localStorage.getItem('crm_clients');
+                  if(c) setTotalClients(JSON.parse(c).length);
+              }
+
+              // Load Projects
+              const projDoc = await getDoc(doc(db, 'crm_data', 'projects'));
+              if(projDoc.exists()) {
+                  const p = projDoc.data().list as Project[];
+                  setActiveProjects(p.filter(x => x.status !== Status.COMPLETED).length);
+              } else {
+                  const p = localStorage.getItem('crm_projects');
+                  if(p) setActiveProjects(JSON.parse(p).filter((x: Project) => x.status !== Status.COMPLETED).length);
+              }
+
+          } catch(e) { console.error("Dashboard sync error", e); }
+      };
+      
+      fetchDashboardData();
   }, []);
 
   const currencySymbol = settings?.currencySymbol || 'Bs';
@@ -150,8 +165,8 @@ export const Dashboard = () => {
                 <p className="text-sm text-gray-400">Comportamiento últimos 6 meses</p>
             </div>
           </div>
-          {/* CRITICAL FIX: Explicit Height Container for Recharts */}
-          <div className="w-full h-[320px] min-h-[320px] flex-1">
+          {/* Explicit height wrapper to prevent Recharts -1 warning */}
+          <div style={{ width: '100%', height: 350 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} barSize={40}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />

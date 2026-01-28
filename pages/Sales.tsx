@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Plus, Trash2, X, Package, Check, Printer, User, CreditCard, RefreshCw, Edit3 } from 'lucide-react';
+import { Search, Plus, Trash2, X, Package, Check, Printer, User, CreditCard, RefreshCw, Edit3, Download, Share2, Copy } from 'lucide-react';
 import { Sale, QuoteItem, AppSettings, InventoryItem, Client, User as UserType } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -32,7 +32,6 @@ const formatCurrency = (amount: number, settings: AppSettings) => {
     return settings.currencyPosition === 'before' ? `${settings.currencySymbol} ${val}` : `${val} ${settings.currencySymbol}`;
 };
 
-// Robust Number to Words Function
 const convertNumberToWordsEs = (amount: number, currencyName: string) => {
     const UNITS = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
     const TENS = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
@@ -80,7 +79,6 @@ const convertNumberToWordsEs = (amount: number, currencyName: string) => {
 };
 
 export const Sales = () => {
-  // Get Current User for Permissions
   const [currentUser, setCurrentUser] = useState<UserType | null>(() => {
       const saved = localStorage.getItem('crm_active_user');
       return saved ? JSON.parse(saved) : null;
@@ -111,42 +109,53 @@ export const Sales = () => {
   const [isCreatingClient, setIsCreatingClient] = useState(false);
 
   const [newSale, setNewSale] = useState<Partial<Sale>>({
-      items: [], amountPaid: 0, subtotal: 0, tax: 0, total: 0, paymentStatus: 'Paid', paymentMethod: 'Cash'
+      items: [], amountPaid: 0, subtotal: 0, discount: 0, tax: 0, total: 0, paymentStatus: 'Paid', paymentMethod: 'Cash'
   });
   const [taxEnabled, setTaxEnabled] = useState(false);
   const [pdfSale, setPdfSale] = useState<Sale | null>(null);
 
   const receiptRef = useRef<HTMLDivElement>(null);
 
+  const canDelete = currentUser?.role === 'Admin' || currentUser?.permissions?.includes('all') || currentUser?.permissions?.includes('delete_sales');
+
   useEffect(() => {
       const loadData = async () => {
+          // Load settings from LocalStorage FIRST to ensure instant load
           const s = localStorage.getItem('crm_settings');
           if (s) setSettings({ ...defaultSettings, ...JSON.parse(s) });
 
+          // Then try cloud sync for settings
+          try {
+              const sDoc = await getDoc(doc(db, 'crm_data', 'settings'));
+              if (sDoc.exists()) {
+                  const cloudSettings = { ...defaultSettings, ...sDoc.data() };
+                  setSettings(cloudSettings);
+                  localStorage.setItem('crm_settings', JSON.stringify(cloudSettings));
+              }
+          } catch(e) {}
+
           let localClients = localStorage.getItem('crm_clients');
           if (localClients) setAvailableClients(JSON.parse(localClients));
-          else {
-              setIsLoadingData(true);
-              try {
-                  const docSnap = await getDoc(doc(db, 'crm_data', 'clients'));
-                  if (docSnap.exists()) {
-                      setAvailableClients(docSnap.data().list);
-                      localStorage.setItem('crm_clients', JSON.stringify(docSnap.data().list));
-                  }
-              } catch(e) {}
-          }
-
+          
           let localInv = localStorage.getItem('crm_inventory');
           if (localInv) setAvailableInventory(JSON.parse(localInv));
-          else {
-              if(!isLoadingData) setIsLoadingData(true);
+
+          if (!localClients || !localInv) {
+              setIsLoadingData(true);
               try {
-                  const docSnap = await getDoc(doc(db, 'crm_data', 'inventory'));
-                  if (docSnap.exists()) {
-                      setAvailableInventory(docSnap.data().list);
-                      localStorage.setItem('crm_inventory', JSON.stringify(docSnap.data().list));
+                  const clientDoc = await getDoc(doc(db, 'crm_data', 'clients'));
+                  if (clientDoc.exists()) {
+                      setAvailableClients(clientDoc.data().list);
+                      localStorage.setItem('crm_clients', JSON.stringify(clientDoc.data().list));
+                  }
+                  
+                  const invDoc = await getDoc(doc(db, 'crm_data', 'inventory'));
+                  if (invDoc.exists()) {
+                      setAvailableInventory(invDoc.data().list);
+                      localStorage.setItem('crm_inventory', JSON.stringify(invDoc.data().list));
                   }
               } catch(e) {}
+              setIsLoadingData(false);
           }
 
           try {
@@ -156,8 +165,6 @@ export const Sales = () => {
                   localStorage.setItem('crm_sales_history', JSON.stringify(docSnap.data().list));
               }
           } catch(e) {}
-          
-          setIsLoadingData(false);
       };
       loadData();
   }, []);
@@ -173,8 +180,12 @@ export const Sales = () => {
   useEffect(() => {
       const items = newSale.items || [];
       const sub = items.reduce((acc, item) => acc + item.total, 0);
-      const tax = taxEnabled ? sub * (settings.taxRate / 100) : 0;
-      const total = sub + tax;
+      
+      const discountAmount = sub * ((newSale.discount || 0) / 100);
+      const taxableAmount = sub - discountAmount;
+      const tax = taxEnabled ? taxableAmount * (settings.taxRate / 100) : 0;
+      
+      const total = taxableAmount + tax;
       
       setNewSale(prev => ({ 
           ...prev, 
@@ -183,11 +194,13 @@ export const Sales = () => {
           total,
           amountPaid: prev.paymentStatus === 'Paid' ? total : prev.amountPaid 
       }));
-  }, [newSale.items, taxEnabled, settings.taxRate, newSale.paymentStatus]);
+  }, [newSale.items, taxEnabled, settings.taxRate, newSale.paymentStatus, newSale.discount]);
 
   // ACTIONS
-  const handleAddItem = (item: InventoryItem) => {
-      const existingItemIndex = newSale.items?.findIndex(i => i.description === item.name);
+  const handleAddItem = (item: InventoryItem, priceOverride?: number) => {
+      const priceToUse = priceOverride !== undefined ? priceOverride : item.price;
+      const existingItemIndex = newSale.items?.findIndex(i => i.description === item.name && i.unitPrice === priceToUse);
+      
       if (existingItemIndex !== undefined && existingItemIndex >= 0) {
           const updatedItems = [...(newSale.items || [])];
           updatedItems[existingItemIndex] = {
@@ -201,8 +214,8 @@ export const Sales = () => {
               id: Math.random().toString(36).substr(2, 9),
               description: item.name,
               quantity: 1,
-              unitPrice: item.price,
-              total: item.price
+              unitPrice: priceToUse,
+              total: priceToUse
           };
           setNewSale({ ...newSale, items: [...(newSale.items || []), newItem] });
       }
@@ -254,6 +267,7 @@ export const Sales = () => {
           date: new Date().toISOString(),
           items: newSale.items,
           subtotal: newSale.subtotal || 0,
+          discount: newSale.discount || 0,
           tax: newSale.tax || 0,
           total: newSale.total || 0,
           amountPaid: newSale.amountPaid || 0,
@@ -274,7 +288,7 @@ export const Sales = () => {
       setPdfSale(finalSale);
       setModalType('preview');
       // Reset form
-      setNewSale({ items: [], amountPaid: 0, subtotal: 0, tax: 0, total: 0, paymentStatus: 'Paid', paymentMethod: 'Cash' });
+      setNewSale({ items: [], amountPaid: 0, subtotal: 0, discount: 0, tax: 0, total: 0, paymentStatus: 'Paid', paymentMethod: 'Cash' });
       setEditingId(null);
       setTaxEnabled(false);
       setView('list');
@@ -288,6 +302,7 @@ export const Sales = () => {
           paymentMethod: sale.paymentMethod,
           paymentStatus: sale.paymentStatus,
           subtotal: sale.subtotal,
+          discount: sale.discount || 0,
           tax: sale.tax,
           total: sale.total,
           amountPaid: sale.amountPaid
@@ -298,8 +313,8 @@ export const Sales = () => {
   };
 
   const handleDeleteSale = (id: string) => {
-      if (currentUser?.role !== 'Admin') {
-          alert("Acción denegada. Solo el administrador puede eliminar recibos.");
+      if (!canDelete) {
+          alert("Acción denegada. No tienes permiso para eliminar ventas.");
           return;
       }
       if (confirm("¿Estás seguro de eliminar este recibo permanentemente? Esta acción no se puede deshacer.")) {
@@ -308,7 +323,22 @@ export const Sales = () => {
       }
   };
 
-  const printPDF = () => {
+  // ... [PDF Generation Functions match previous implementation] ...
+  const handleDirectPrint = () => {
+      if (receiptRef.current && pdfSale) {
+          html2canvas(receiptRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false }).then(canvas => {
+              const imgData = canvas.toDataURL('image/png');
+              const pdf = new jsPDF('p', 'mm', 'a4');
+              const pdfWidth = pdf.internal.pageSize.getWidth();
+              const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+              pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+              const pdfBlob = pdf.output('bloburl');
+              window.open(pdfBlob, '_blank');
+          });
+      }
+  };
+
+  const handleDownloadPDF = () => {
       if (receiptRef.current && pdfSale) {
           html2canvas(receiptRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false }).then(canvas => {
               const imgData = canvas.toDataURL('image/png');
@@ -317,9 +347,15 @@ export const Sales = () => {
               const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
               pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
               pdf.save(`Venta_${pdfSale.id}.pdf`);
-              setModalType('none');
-              setPdfSale(null);
           });
+      }
+  };
+
+  const handleShareWhatsApp = () => {
+      if(pdfSale) {
+          const text = `Hola, aquí tienes el recibo de tu compra *${pdfSale.id}* por un total de *${formatCurrency(pdfSale.total, settings)}*.`;
+          const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+          window.open(url, '_blank');
       }
   };
 
@@ -338,7 +374,7 @@ export const Sales = () => {
                 <p className="text-sm text-gray-500">Punto de venta</p>
             </div>
             {view === 'list' ? (
-                <button onClick={() => { setEditingId(null); setNewSale({ items: [], amountPaid: 0, subtotal: 0, tax: 0, total: 0, paymentStatus: 'Paid', paymentMethod: 'Cash' }); setTaxEnabled(false); setView('create'); }} className="bg-brand-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-800 flex items-center gap-2 shadow-lg active:scale-95">
+                <button onClick={() => { setEditingId(null); setNewSale({ items: [], amountPaid: 0, subtotal: 0, discount: 0, tax: 0, total: 0, paymentStatus: 'Paid', paymentMethod: 'Cash' }); setTaxEnabled(false); setView('create'); }} className="bg-brand-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-800 flex items-center gap-2 shadow-lg active:scale-95">
                     <Plus size={18} /> Nueva Venta
                 </button>
             ) : (
@@ -389,14 +425,15 @@ export const Sales = () => {
                                         >
                                             <Edit3 size={18} />
                                         </button>
-                                        <button 
-                                            onClick={() => handleDeleteSale(sale.id)}
-                                            className={`p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors ${currentUser?.role !== 'Admin' ? 'opacity-30 cursor-not-allowed' : ''}`}
-                                            title="Eliminar (Solo Admin)"
-                                            disabled={currentUser?.role !== 'Admin'}
-                                        >
-                                            <Trash2 size={18} />
-                                        </button>
+                                        {canDelete && (
+                                            <button 
+                                                onClick={() => handleDeleteSale(sale.id)}
+                                                className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                title="Eliminar"
+                                            >
+                                                <Trash2 size={18} />
+                                            </button>
+                                        )}
                                     </td>
                                 </tr>
                             ))}
@@ -409,6 +446,8 @@ export const Sales = () => {
             </div>
         )}
         
+        {/* ... [Rest of the Component remains unchanged, it uses canDelete logic implicitly in view] ... */}
+        {/* For brevity, retaining existing structure for 'create' view and Modals */}
         {view === 'create' && (
              <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-6">
@@ -465,6 +504,26 @@ export const Sales = () => {
                         <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><CreditCard size={18}/> Resumen de Pago</h3>
                         <div className="space-y-3 mb-6">
                             <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span>{formatCurrency(newSale.subtotal || 0, settings)}</span></div>
+                            
+                            <div className="flex justify-between items-center pb-2 border-b border-gray-200/60">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm text-gray-600">Descuento</span>
+                                    <div className="flex items-center bg-white px-2 py-0.5 rounded border border-gray-300">
+                                        <input 
+                                            type="number" 
+                                            className="w-10 text-right text-xs outline-none font-bold text-gray-900 bg-white" 
+                                            value={newSale.discount || ''} 
+                                            onChange={(e) => setNewSale({...newSale, discount: Number(e.target.value)})}
+                                            placeholder="0"
+                                        />
+                                        <span className="text-xs font-bold text-gray-500">%</span>
+                                    </div>
+                                </div>
+                                <span className="text-sm font-medium text-red-500">
+                                    - {formatCurrency((newSale.subtotal || 0) * ((newSale.discount || 0)/100), settings)}
+                                </span>
+                            </div>
+
                             <div className="flex justify-between items-center text-sm text-gray-600">
                                 <label className="flex items-center gap-2 cursor-pointer select-none">
                                     <button type="button" onClick={() => setTaxEnabled(!taxEnabled)} className={`w-9 h-5 rounded-full transition-colors flex items-center px-0.5 ${taxEnabled ? 'bg-brand-900' : 'bg-gray-300'}`}>
@@ -482,21 +541,22 @@ export const Sales = () => {
              </div>
         )}
 
-        {/* 3. PDF Preview Modal */}
+        {/* ... (Modals remain unchanged) ... */}
         {modalType === 'preview' && pdfSale && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
                 <div className="bg-white rounded-2xl w-full max-w-4xl h-[90vh] flex flex-col shadow-2xl overflow-hidden relative">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-900 text-white">
                         <h3 className="font-bold flex items-center gap-2"><Check size={20} className="text-green-400"/> Venta Registrada</h3>
                         <div className="flex gap-2">
-                             <button onClick={printPDF} className="px-4 py-1.5 bg-white text-brand-900 rounded-lg text-sm font-bold hover:bg-gray-100 flex items-center gap-2"><Printer size={16}/> Imprimir</button>
-                             <button onClick={() => { setModalType('none'); setPdfSale(null); }} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"><X size={20}/></button>
+                             <button onClick={handleShareWhatsApp} className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors" title="Compartir"><Share2 size={18}/></button>
+                             <button onClick={handleDownloadPDF} className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors" title="Descargar PDF"><Download size={18}/></button>
+                             <button onClick={handleDirectPrint} className="px-4 py-1.5 bg-white text-brand-900 rounded-lg text-sm font-bold hover:bg-gray-100 flex items-center gap-2"><Printer size={16}/> Imprimir</button>
+                             <button onClick={() => { setModalType('none'); setPdfSale(null); }} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors ml-2"><X size={20}/></button>
                         </div>
                     </div>
                     
                     <div className="flex-1 overflow-auto bg-gray-100 p-8 flex justify-center">
                         <div ref={receiptRef} className="w-[210mm] min-h-[297mm] bg-white text-slate-800 relative font-sans shadow-2xl">
-                             {/* HEADER PDF */}
                              <div className="p-10 flex justify-between items-center" style={{ backgroundColor: settings.pdfHeaderColor || settings.primaryColor || '#1e293b' }}>
                                 <div className="flex items-center">
                                      {settings.logoUrl ? (
@@ -515,7 +575,6 @@ export const Sales = () => {
                             </div>
 
                             <div className="px-12 pt-12">
-                                {/* INFO ROW */}
                                 <div className="flex justify-between mb-8 text-sm border-b border-gray-100 pb-8">
                                     <div className="w-[45%]">
                                         <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">Recibí de:</p>
@@ -538,7 +597,6 @@ export const Sales = () => {
                                     </div>
                                 </div>
 
-                                {/* TABLE */}
                                 <div className="mb-10">
                                     <div className="bg-gray-50 flex px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-500 rounded-md mb-2">
                                         <div className="flex-1">Descripción</div>
@@ -559,9 +617,7 @@ export const Sales = () => {
                                     <div className="border-t border-gray-200 mt-2"></div>
                                 </div>
 
-                                {/* FOOTER SECTION */}
                                 <div className="flex justify-between items-start">
-                                    {/* Left: Amount in Words */}
                                     <div className="w-[60%] pr-8">
                                         <div className="mb-6">
                                             <h4 className="font-bold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">El monto de:</h4>
@@ -577,10 +633,10 @@ export const Sales = () => {
                                         </div>
                                     </div>
 
-                                    {/* Right: Totals & Signature */}
                                     <div className="w-[35%] flex flex-col items-end">
                                         <div className="w-full bg-gray-50 p-5 rounded-lg space-y-2 border border-gray-100 mb-8">
                                             <div className="flex justify-between text-sm text-gray-600 font-medium"><span>Subtotal</span><span>{formatCurrency(pdfSale.subtotal, settings)}</span></div>
+                                            {pdfSale.discount > 0 && (<div className="flex justify-between text-sm text-gray-600 font-medium"><span>Descuento ({pdfSale.discount}%)</span><span className="text-red-500">-{formatCurrency(pdfSale.subtotal * (pdfSale.discount/100), settings)}</span></div>)}
                                             {pdfSale.tax > 0 && (<div className="flex justify-between text-sm text-gray-600 font-medium"><span>{settings.taxName} ({settings.taxRate}%)</span><span>{formatCurrency(pdfSale.tax, settings)}</span></div>)}
                                             <div className="flex justify-between text-xl font-bold text-gray-900 border-t border-gray-200 pt-3 mt-1"><span>TOTAL</span><span>{formatCurrency(pdfSale.total, settings)}</span></div>
                                         </div>
@@ -596,7 +652,6 @@ export const Sales = () => {
                                 </div>
                             </div>
 
-                            {/* FOOTER */}
                             <div className="absolute bottom-0 left-0 w-full">
                                 <div className="bg-gray-100 text-center py-3 border-t border-gray-200">
                                     <p className="text-[10px] text-gray-500 tracking-wider font-medium uppercase">{settings.pdfFooterText || `${settings.website} • ${settings.address}`}</p>
@@ -607,8 +662,8 @@ export const Sales = () => {
                 </div>
             </div>
         )}
-
-        {/* ... (Existing Client & Catalog Modals - kept as is) ... */}
+        
+        {/* ... (Client/Catalog Modals are fine) ... */}
         {modalType === 'client' && (
             <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                 <div className="bg-white rounded-2xl w-full max-w-md h-[450px] shadow-2xl animate-in zoom-in duration-200 overflow-hidden flex flex-col relative">
@@ -651,7 +706,7 @@ export const Sales = () => {
 
         {modalType === 'catalog' && (
             <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-                <div className="bg-white rounded-2xl w-full max-w-2xl h-[600px] flex flex-col shadow-2xl animate-in zoom-in duration-200">
+                <div className="bg-white rounded-2xl w-full max-w-2xl h-[700px] flex flex-col shadow-2xl animate-in zoom-in duration-200">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                         <h3 className="font-bold text-gray-900">Catálogo</h3>
                         <button onClick={() => setModalType('none')}><X size={20} className="text-gray-400"/></button>
@@ -670,14 +725,35 @@ export const Sales = () => {
                          </div>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {filteredCatalog.map(item => (
-                                <div key={item.id} onClick={() => handleAddItem(item)} className="bg-white p-3 rounded-xl border border-gray-200 hover:border-brand-500 cursor-pointer shadow-sm hover:shadow-md transition-all">
-                                    <div className="flex justify-between items-start">
+                                <div key={item.id} className="bg-white p-4 rounded-xl border border-gray-200 hover:border-brand-500 shadow-sm hover:shadow-md transition-all group flex flex-col">
+                                    <div className="flex justify-between items-start mb-2">
                                         <h4 className="font-bold text-sm text-gray-900 line-clamp-1">{item.name}</h4>
-                                        <span className="text-xs font-bold text-brand-600">{formatCurrency(item.price, settings)}</span>
+                                        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded uppercase">{item.category}</span>
                                     </div>
-                                    <p className="text-xs text-gray-500 mt-1 line-clamp-1">{item.category}</p>
+                                    <p className="text-xs text-gray-500 mb-3 line-clamp-2 h-8">{item.description || 'Sin descripción'}</p>
+                                    
+                                    <div className="mt-auto border-t border-gray-100 pt-2 space-y-1">
+                                        <button onClick={() => handleAddItem(item, item.price)} className="w-full text-xs bg-gray-50 hover:bg-gray-100 text-gray-700 py-2 rounded-lg flex justify-between px-3 font-medium transition-colors">
+                                            <span>Precio Unitario</span> <span className="font-bold text-brand-900">{formatCurrency(item.price, settings)}</span>
+                                        </button>
+                                        {item.priceDozen && item.priceDozen > 0 && (
+                                            <button onClick={() => handleAddItem(item, item.priceDozen)} className="w-full text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 py-2 rounded-lg flex justify-between px-3 font-medium transition-colors">
+                                                <span>Precio A</span> <span className="font-bold">{formatCurrency(item.priceDozen, settings)}</span>
+                                            </button>
+                                        )}
+                                        {item.priceBox && item.priceBox > 0 && (
+                                            <button onClick={() => handleAddItem(item, item.priceBox)} className="w-full text-xs bg-orange-50 hover:bg-orange-100 text-orange-700 py-2 rounded-lg flex justify-between px-3 font-medium transition-colors">
+                                                <span>Precio B</span> <span className="font-bold">{formatCurrency(item.priceBox, settings)}</span>
+                                            </button>
+                                        )}
+                                        {item.priceWholesale && item.priceWholesale > 0 && (
+                                            <button onClick={() => handleAddItem(item, item.priceWholesale)} className="w-full text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 py-2 rounded-lg flex justify-between px-3 font-medium transition-colors">
+                                                <span>Precio C</span> <span className="font-bold">{formatCurrency(item.priceWholesale, settings)}</span>
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             ))}
                         </div>

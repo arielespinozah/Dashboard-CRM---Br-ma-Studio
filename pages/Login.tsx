@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PenTool, Lock, Mail, ArrowRight, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { PenTool, Lock, Mail, ArrowRight, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { User } from '../types';
 import { db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -13,26 +13,49 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [syncStatus, setSyncStatus] = useState<'loading' | 'success' | 'error'>('loading');
+    const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+    const syncUsers = async () => {
+        setSyncStatus('loading');
+        try {
+            // Fetch Users
+            const docRef = doc(db, 'crm_data', 'users');
+            const docSnap = await getDoc(docRef);
+            
+            if (docSnap.exists()) {
+                const cloudUsers = docSnap.data().list as User[];
+                if (cloudUsers && cloudUsers.length > 0) {
+                    localStorage.setItem('crm_users', JSON.stringify(cloudUsers));
+                }
+            }
+
+            // Fetch Settings for Logo
+            const settingsRef = doc(db, 'crm_data', 'settings');
+            const settingsSnap = await getDoc(settingsRef);
+            if (settingsSnap.exists()) {
+                const s = settingsSnap.data();
+                if(s.logoUrl) {
+                    setLogoUrl(s.logoUrl);
+                    localStorage.setItem('crm_settings', JSON.stringify(s));
+                }
+            } else {
+                // Fallback to local
+                const localSettings = localStorage.getItem('crm_settings');
+                if (localSettings) {
+                    const parsed = JSON.parse(localSettings);
+                    if (parsed.logoUrl) setLogoUrl(parsed.logoUrl);
+                }
+            }
+
+            setSyncStatus('success');
+        } catch (e) {
+            console.error("Sync failed", e);
+            setSyncStatus('error');
+        }
+    };
 
     // Sync users from Cloud on mount
     useEffect(() => {
-        const syncUsers = async () => {
-            try {
-                const docRef = doc(db, 'crm_data', 'users');
-                const docSnap = await getDoc(docRef);
-                
-                if (docSnap.exists()) {
-                    const cloudUsers = docSnap.data().list as User[];
-                    if (cloudUsers && cloudUsers.length > 0) {
-                        localStorage.setItem('crm_users', JSON.stringify(cloudUsers));
-                    }
-                }
-                setSyncStatus('success');
-            } catch (e) {
-                setSyncStatus('error');
-            }
-        };
-        
         syncUsers();
     }, []);
 
@@ -40,35 +63,26 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         e.preventDefault();
         setError('');
         
-        // 1. Get stored users (updated from cloud) or use defaults if empty
         const storedUsers = localStorage.getItem('crm_users');
         let users: User[] = [];
         
         if (storedUsers) {
             users = JSON.parse(storedUsers);
         } else {
-            // Only set defaults if absolutely no users exist in storage and cloud fetch failed/empty
             users = [
                 { id: '1', name: 'Admin Principal', email: 'admin@brama.com.bo', role: 'Admin', active: true },
                 { id: '2', name: 'Vendedor 1', email: 'ventas@brama.com.bo', role: 'Sales', active: true }
             ];
-            // Save defaults to persist them immediately
             localStorage.setItem('crm_users', JSON.stringify(users));
         }
 
-        // 2. Find user
         const foundUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-
-        // 3. Auth Check
         let isAuthenticated = false;
 
         if (foundUser) {
             if (foundUser.active) {
-                // Hardcoded check for default admins
                 if (email === 'admin@brama.com.bo' && password === 'admin') isAuthenticated = true;
                 else if (email === 'ventas@brama.com.bo' && password === 'ventas') isAuthenticated = true;
-                // Generic check for custom users (Simulation: any password > 3 chars)
-                // In a real app, you would verify hashed password here
                 else if (password.length > 3) isAuthenticated = true; 
                 else setError('Contraseña incorrecta');
             } else {
@@ -89,16 +103,27 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 {/* Sync Status Indicator */}
                 <div className={`absolute top-0 left-0 w-full h-1 ${syncStatus === 'loading' ? 'bg-blue-500 animate-pulse' : syncStatus === 'success' ? 'bg-green-500' : 'bg-red-500'}`}></div>
                 
-                <div className="text-center mb-8">
-                    <div className="w-16 h-16 bg-brand-900 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-brand-900/30 mx-auto mb-4">
-                        <PenTool size={32} />
-                    </div>
-                    <h1 className="text-2xl font-bold text-brand-900">Bráma Studio</h1>
+                <div className="text-center mb-8 flex flex-col items-center">
+                    {logoUrl ? (
+                        <img src={logoUrl} alt="Logo" className="h-24 w-auto object-contain mb-4" />
+                    ) : (
+                        <>
+                            <div className="w-16 h-16 bg-brand-900 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-brand-900/30 mx-auto mb-4">
+                                <PenTool size={32} />
+                            </div>
+                            <h1 className="text-2xl font-bold text-brand-900">Bráma Studio</h1>
+                        </>
+                    )}
                     <p className="text-gray-500 text-sm mt-2">Ingresa a tu espacio de trabajo</p>
                     
-                    <div className="flex justify-center items-center gap-2 mt-4">
+                    <div className="flex justify-center items-center gap-2 mt-4 h-6">
                         {syncStatus === 'loading' && <span className="text-xs text-blue-500 flex items-center gap-1"><RefreshCw size={12} className="animate-spin"/> Sincronizando usuarios...</span>}
                         {syncStatus === 'success' && <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 size={12}/> Base de datos conectada</span>}
+                        {syncStatus === 'error' && (
+                            <button onClick={syncUsers} className="text-xs text-red-500 flex items-center gap-1 hover:underline bg-red-50 px-2 py-0.5 rounded cursor-pointer">
+                                <AlertTriangle size={12}/> Error de conexión. Reintentar
+                            </button>
+                        )}
                     </div>
                 </div>
 

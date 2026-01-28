@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Upload, Building, FileText, CreditCard, Users, Trash2, Plus, Check, DollarSign, Database, MessageSquare, Download, Lock, User as UserIcon, Edit3, X, Shield, Printer, Mail, Link as LinkIcon } from 'lucide-react';
+import { Save, Upload, Building, FileText, CreditCard, Users, Trash2, Plus, Check, DollarSign, Database, MessageSquare, Download, Lock, User as UserIcon, Edit3, X, Shield, Printer, Mail, Link as LinkIcon, RefreshCw } from 'lucide-react';
 import { AppSettings, User } from '../types';
 import { db } from '../firebase'; 
 import { doc, setDoc, getDoc } from 'firebase/firestore';
@@ -28,8 +28,35 @@ const defaultSettings: AppSettings = {
 
 const defaultUsers: User[] = [
     { id: '1', name: 'Admin Principal', email: 'admin@brama.com.bo', role: 'Admin', active: true, password: 'admin', permissions: ['all'] },
-    { id: '2', name: 'Vendedor 1', email: 'ventas@brama.com.bo', role: 'Sales', active: true, password: 'ventas', permissions: ['sales', 'quotes'] },
+    { id: '2', name: 'Vendedor 1', email: 'ventas@brama.com.bo', role: 'Sales', active: true, password: 'ventas', permissions: ['view_sales', 'view_quotes', 'view_clients', 'view_calendar', 'view_dashboard'] },
 ];
+
+const availablePermissions = [
+    { id: 'view_dashboard', label: 'Ver Dashboard' },
+    { id: 'view_calendar', label: 'Ver Agenda' },
+    { id: 'view_finance', label: 'Ver Finanzas' },
+    { id: 'view_sales', label: 'Ver/Crear Ventas' },
+    { id: 'delete_sales', label: 'Eliminar Ventas (Riesgo)' }, // New
+    { id: 'view_quotes', label: 'Gestionar Cotizaciones' },
+    { id: 'view_projects', label: 'Gestionar Proyectos' },
+    { id: 'view_inventory', label: 'Ver Insumos' },
+    { id: 'manage_inventory', label: 'Crear/Borrar Productos' }, // New
+    { id: 'view_catalog', label: 'Ver Catálogo' },
+    { id: 'view_clients', label: 'Ver Clientes' },
+    { id: 'view_reports', label: 'Ver Reportes' },
+    { id: 'manage_settings', label: 'Acceso a Ajustes Globales' },
+];
+
+// Switch Component
+const Switch = ({ checked, onChange, disabled }: { checked: boolean, onChange: () => void, disabled?: boolean }) => (
+    <button 
+        type="button"
+        onClick={!disabled ? onChange : undefined} 
+        className={`w-11 h-6 rounded-full flex items-center transition-colors duration-300 px-1 focus:outline-none ${checked ? 'bg-brand-500' : 'bg-gray-300'} ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+    >
+        <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform duration-300 ${checked ? 'translate-x-5' : 'translate-x-0'}`} />
+    </button>
+);
 
 export const Settings = () => {
     const [searchParams] = useSearchParams();
@@ -47,11 +74,11 @@ export const Settings = () => {
 
     const [activeTab, setActiveTab] = useState(initialTab === 'profile' ? 'profile' : 'company');
     const [showToast, setShowToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
     
     // User Mgmt State
     const [isUserModalOpen, setIsUserModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<Partial<User> | null>(null);
-    const [waToken, setWaToken] = useState(() => localStorage.getItem('crm_wa_token') || '');
     
     // Profile State
     const [myPassword, setMyPassword] = useState('');
@@ -71,19 +98,17 @@ export const Settings = () => {
                 if (sDoc.exists()) setSettings({ ...defaultSettings, ...sDoc.data() as AppSettings });
                 
                 const uDoc = await getDoc(doc(db, 'crm_data', 'users'));
-                if (uDoc.exists()) setUsers(uDoc.data().list);
-             } catch(e) {}
+                if (uDoc.exists()) {
+                    const cloudUsers = uDoc.data().list;
+                    setUsers(cloudUsers);
+                    localStorage.setItem('crm_users', JSON.stringify(cloudUsers));
+                }
+             } catch(e) {
+                 console.error("Error fetching cloud data", e);
+             }
         };
         fetchCloud();
     }, []);
-
-    useEffect(() => {
-        localStorage.setItem('crm_settings', JSON.stringify(settings));
-    }, [settings]);
-
-    useEffect(() => {
-        localStorage.setItem('crm_users', JSON.stringify(users));
-    }, [users]);
 
     // --- HANDLERS ---
     const handleChange = (field: keyof AppSettings, value: any) => {
@@ -91,15 +116,24 @@ export const Settings = () => {
     };
 
     const handleSave = async () => {
+        setIsSaving(true);
         try {
-            localStorage.setItem('crm_settings', JSON.stringify(settings));
-            localStorage.setItem('crm_users', JSON.stringify(users));
-            localStorage.setItem('crm_wa_token', waToken);
-            await setDoc(doc(db, 'crm_data', 'settings'), settings);
-            await setDoc(doc(db, 'crm_data', 'users'), { list: users });
+            const cleanSettings = JSON.parse(JSON.stringify(settings));
+            localStorage.setItem('crm_settings', JSON.stringify(cleanSettings));
+            
+            const cleanUsers = JSON.parse(JSON.stringify(users));
+            localStorage.setItem('crm_users', JSON.stringify(cleanUsers));
+
+            await setDoc(doc(db, 'crm_data', 'settings'), cleanSettings);
+            await setDoc(doc(db, 'crm_data', 'users'), { list: cleanUsers });
+            
             setShowToast({ message: `Configuración guardada exitosamente`, type: 'success' });
-        } catch(e) {
-            setShowToast({ message: `Error al guardar en la nube`, type: 'error' });
+        } catch(e: any) {
+            console.error(e);
+            setShowToast({ message: `Error: ${e.message}`, type: 'error' });
+        } finally {
+            setIsSaving(false);
+            setTimeout(() => setShowToast(null), 3000);
         }
     };
 
@@ -114,98 +148,83 @@ export const Settings = () => {
         }
     };
 
-    // --- BACKUP ---
-    const handleExportBackup = () => {
-        const backupData = {
-            settings: localStorage.getItem('crm_settings'),
-            users: localStorage.getItem('crm_users'),
-            clients: localStorage.getItem('crm_clients'),
-            projects: localStorage.getItem('crm_projects'),
-            quotes: localStorage.getItem('crm_quotes'),
-            sales: localStorage.getItem('crm_sales_history'),
-            inventory: localStorage.getItem('crm_inventory'),
-            timestamp: new Date().toISOString()
-        };
-        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `brama_backup_${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-    };
-
-    const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        if(!confirm('ADVERTENCIA: Esto sobrescribirá todos los datos actuales. ¿Continuar?')) return;
-
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            try {
-                const data = JSON.parse(event.target?.result as string);
-                if(data.settings) localStorage.setItem('crm_settings', data.settings);
-                if(data.users) localStorage.setItem('crm_users', data.users);
-                if(data.clients) localStorage.setItem('crm_clients', data.clients);
-                if(data.projects) localStorage.setItem('crm_projects', data.projects);
-                if(data.quotes) localStorage.setItem('crm_quotes', data.quotes);
-                if(data.sales) localStorage.setItem('crm_sales_history', data.sales);
-                if(data.inventory) localStorage.setItem('crm_inventory', data.inventory);
-                window.location.reload();
-            } catch (err) {
-                alert('Archivo inválido.');
-            }
-        };
-        reader.readAsText(file);
-    };
-
     // --- USER MGMT ---
     const handleEditUser = (user: User) => {
-        setEditingUser({ ...user, password: '' });
+        setEditingUser({ ...user, password: user.password || '' });
         setIsUserModalOpen(true);
     };
 
     const handleNewUser = () => {
-        setEditingUser({ name: '', email: '', role: 'Sales', active: true, password: '', permissions: [] });
+        setEditingUser({ name: '', email: '', role: 'Sales', active: true, password: '', permissions: ['view_dashboard', 'view_sales', 'view_calendar'] });
         setIsUserModalOpen(true);
     };
 
-    const handleSaveUser = (e: React.FormEvent) => {
+    const sanitizeUser = (user: Partial<User>): User => {
+        let finalPermissions = user.permissions || [];
+        if (user.role === 'Admin') {
+            finalPermissions = ['all']; 
+        }
+
+        return {
+            id: user.id || Math.random().toString(36).substr(2, 9),
+            name: user.name || '',
+            email: user.email || '',
+            role: user.role || 'Viewer',
+            active: user.active ?? true,
+            password: user.password || '', 
+            permissions: finalPermissions,
+            avatar: user.avatar || null as any
+        };
+    };
+
+    const handleSaveUser = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingUser?.email || !editingUser.name) return;
 
         let updatedUsers = [...users];
-        if (editingUser.id) {
-            updatedUsers = users.map(u => {
-                if (u.id === editingUser.id) {
-                    return { ...u, ...editingUser, password: editingUser.password ? editingUser.password : u.password } as User;
-                }
-                return u;
-            });
-        } else {
-            if (!editingUser.password) { alert("Debe establecer una contraseña"); return; }
-            const newUser: User = {
-                id: Math.random().toString(36).substr(2, 9),
-                name: editingUser.name!,
-                email: editingUser.email!,
-                role: editingUser.role as any,
-                active: editingUser.active ?? true,
-                password: editingUser.password,
-                permissions: editingUser.permissions || []
-            };
-            updatedUsers.push(newUser);
+        
+        try {
+            if (editingUser.id) {
+                updatedUsers = users.map(u => {
+                    if (u.id === editingUser.id) {
+                        return sanitizeUser({ ...u, ...editingUser });
+                    }
+                    return u;
+                });
+            } else {
+                if (!editingUser.password) { alert("Debe establecer una contraseña"); return; }
+                updatedUsers.push(sanitizeUser(editingUser));
+            }
+
+            setUsers(updatedUsers);
+            
+            const cleanList = JSON.parse(JSON.stringify(updatedUsers));
+            localStorage.setItem('crm_users', JSON.stringify(cleanList));
+            await setDoc(doc(db, 'crm_data', 'users'), { list: cleanList });
+
+            setIsUserModalOpen(false);
+            setShowToast({ message: 'Usuario guardado correctamente', type: 'success' });
+        } catch (error: any) {
+            console.error("Error saving user:", error);
+            setShowToast({ message: `Error al guardar: ${error.message}`, type: 'error' });
         }
-        setUsers(updatedUsers);
-        setIsUserModalOpen(false);
-        setShowToast({ message: 'Usuario guardado', type: 'success' });
+        
+        setTimeout(() => setShowToast(null), 3000);
     };
 
-    const handleDeleteUser = (id: string) => {
-        if (confirm('¿Eliminar usuario?')) setUsers(users.filter(u => u.id !== id));
+    const handleDeleteUser = async (id: string) => {
+        if (confirm('¿Eliminar usuario?')) {
+            const updated = users.filter(u => u.id !== id);
+            setUsers(updated);
+            localStorage.setItem('crm_users', JSON.stringify(updated));
+            await setDoc(doc(db, 'crm_data', 'users'), { list: updated });
+        }
     };
 
     const togglePermission = (perm: string) => {
         if (!editingUser) return;
+        if (editingUser.role === 'Admin') return; 
+
         const currentPerms = editingUser.permissions || [];
         setEditingUser({ 
             ...editingUser, 
@@ -215,8 +234,9 @@ export const Settings = () => {
 
     const handleChangeMyPassword = () => {
         if (myPassword !== myConfirmPassword) { setShowToast({ message: "No coinciden", type: 'error' }); return; }
-        setShowToast({ message: "Contraseña actualizada", type: 'success' });
+        setShowToast({ message: "Contraseña actualizada (Simulado)", type: 'success' });
         setMyPassword(''); setMyConfirmPassword('');
+        setTimeout(() => setShowToast(null), 3000);
     };
 
     return (
@@ -235,12 +255,13 @@ export const Settings = () => {
                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Configuración</h1>
                     <p className="text-sm text-gray-500">Administra el sistema</p>
                 </div>
-                <button onClick={handleSave} className="flex items-center gap-2 px-6 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg active:scale-95">
-                    <Save size={18} /> Guardar Cambios
+                <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 px-6 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg active:scale-95 disabled:opacity-50">
+                    {isSaving ? <RefreshCw className="animate-spin" size={18}/> : <Save size={18} />} {isSaving ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
             </div>
 
             <div className="flex flex-col md:flex-row gap-8">
+                {/* Sidebar Navigation */}
                 <div className="w-full md:w-64 space-y-1">
                     <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-2">Cuenta</p>
                     <button onClick={() => setActiveTab('profile')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'profile' ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}`}><UserIcon size={18} /> Mi Perfil</button>
@@ -250,7 +271,6 @@ export const Settings = () => {
                         { id: 'pdf', icon: Printer, label: 'Documentos PDF' },
                         { id: 'users', icon: Users, label: 'Usuarios' },
                         { id: 'finance', icon: DollarSign, label: 'Finanzas' },
-                        { id: 'integrations', icon: Database, label: 'Integraciones' },
                     ].map((tab) => (
                         <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}`}>
                             <tab.icon size={18} /> {tab.label}
@@ -264,8 +284,8 @@ export const Settings = () => {
                         <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
                             <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2"><Lock size={20}/> Seguridad Personal</h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Nueva Contraseña</label><input type="password" className="w-full px-4 py-2 border border-gray-200 rounded-xl outline-none" value={myPassword} onChange={(e) => setMyPassword(e.target.value)} /></div>
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Confirmar</label><input type="password" className="w-full px-4 py-2 border border-gray-200 rounded-xl outline-none" value={myConfirmPassword} onChange={(e) => setMyConfirmPassword(e.target.value)} /></div>
+                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Nueva Contraseña</label><input type="password" className="w-full px-4 py-2 border border-gray-200 rounded-xl outline-none bg-white text-gray-900" value={myPassword} onChange={(e) => setMyPassword(e.target.value)} /></div>
+                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Confirmar</label><input type="password" className="w-full px-4 py-2 border border-gray-200 rounded-xl outline-none bg-white text-gray-900" value={myConfirmPassword} onChange={(e) => setMyConfirmPassword(e.target.value)} /></div>
                             </div>
                             <button onClick={handleChangeMyPassword} className="px-4 py-2 bg-gray-100 text-gray-700 font-bold rounded-lg hover:bg-gray-200 text-sm">Actualizar</button>
                         </div>
@@ -274,82 +294,87 @@ export const Settings = () => {
                     {/* COMPANY */}
                     {activeTab === 'company' && (
                         <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
-                            <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Datos Generales</h2>
+                            <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Datos Generales & Logo</h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Comercial</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl" value={settings.companyName} onChange={(e) => handleChange('companyName', e.target.value)} /></div>
+                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Comercial</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.companyName} onChange={(e) => handleChange('companyName', e.target.value)} /></div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Color Principal</label>
-                                    <div className="flex gap-2"><input type="color" className="h-10 w-12 rounded cursor-pointer border-none" value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} /><input type="text" className="flex-1 px-4 py-2 border border-gray-200 rounded-xl" value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} /></div>
+                                    <div className="flex gap-2"><input type="color" className="h-10 w-12 rounded cursor-pointer border-none" value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} /><input type="text" className="flex-1 px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} /></div>
+                                </div>
+                            </div>
+                            {/* Logo Upload Section reused/shared with PDF, but users can see it here too */}
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">Logo del Sistema (Login y Menú)</label>
+                                <div className="flex items-center gap-4">
+                                    <div className="h-20 w-20 border border-gray-200 rounded-xl bg-gray-50 flex items-center justify-center relative overflow-hidden group">
+                                        {settings.logoUrl ? <img src={settings.logoUrl} className="h-full object-contain" alt="Logo"/> : <Upload size={24} className="text-gray-400"/>}
+                                        <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" onChange={(e) => handleImageUpload('logoUrl', e)} />
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="text-xs text-gray-500 mb-2">Este logo reemplazará el icono y texto por defecto en el menú lateral y pantalla de inicio.</p>
+                                        <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-white">
+                                            <LinkIcon size={14} className="text-gray-400"/>
+                                            <input type="text" placeholder="O pegar URL de imagen..." className="flex-1 text-xs outline-none text-gray-700 bg-white" value={settings.logoUrl || ''} onChange={(e) => handleChange('logoUrl', e.target.value)} />
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* PDF RESTORED STRUCTURE */}
+                    {/* PDF */}
                     {activeTab === 'pdf' && (
                         <div className="space-y-6">
-                            {/* HEADER SECTION */}
                             <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
                                 <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-4 mb-6 flex items-center gap-2"><Building size={20}/> Estilo & Cabecera</h2>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    {/* LOGO */}
                                     <div>
-                                        <label className="block text-sm font-bold text-gray-700 mb-2">Logo de la Empresa</label>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">Logo Documentos</label>
                                         <div className="flex flex-col gap-3">
                                             <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 flex flex-col items-center justify-center bg-gray-50 h-32 relative overflow-hidden group">
                                                 {settings.logoUrl ? <img src={settings.logoUrl} className="h-full object-contain" alt="Logo"/> : <div className="text-gray-400 flex flex-col items-center"><Upload size={24}/><span className="text-xs mt-2">Subir Imagen</span></div>}
                                                 <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" onChange={(e) => handleImageUpload('logoUrl', e)} />
                                             </div>
-                                            <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-white">
-                                                <LinkIcon size={14} className="text-gray-400"/>
-                                                <input type="text" placeholder="O pegar URL de imagen..." className="flex-1 text-xs outline-none text-gray-700" value={settings.logoUrl || ''} onChange={(e) => handleChange('logoUrl', e.target.value)} />
-                                            </div>
                                         </div>
                                     </div>
-                                    {/* COLORS & INFO */}
                                     <div className="space-y-4">
                                         <div>
                                             <label className="block text-sm font-bold text-gray-700 mb-1">Color Fondo Cabecera</label>
                                             <div className="flex gap-2">
                                                 <input type="color" className="h-10 w-12 rounded cursor-pointer border-none" value={settings.pdfHeaderColor || settings.primaryColor} onChange={(e) => handleChange('pdfHeaderColor', e.target.value)} />
-                                                <input type="text" className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm" value={settings.pdfHeaderColor || settings.primaryColor} onChange={(e) => handleChange('pdfHeaderColor', e.target.value)} />
+                                                <input type="text" className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-900" value={settings.pdfHeaderColor || settings.primaryColor} onChange={(e) => handleChange('pdfHeaderColor', e.target.value)} />
                                             </div>
                                         </div>
                                         <div>
                                             <label className="block text-sm font-bold text-gray-700 mb-1">Información del Emisor (Derecha)</label>
-                                            <textarea className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm h-24 resize-none" value={settings.pdfSenderInfo} onChange={(e) => handleChange('pdfSenderInfo', e.target.value)} placeholder="Dirección, Teléfono, Ciudad..." />
+                                            <textarea className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm h-24 resize-none bg-white text-gray-900" value={settings.pdfSenderInfo} onChange={(e) => handleChange('pdfSenderInfo', e.target.value)} placeholder="Dirección, Teléfono, Ciudad..." />
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* BODY & FOOTER SECTION */}
                             <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
                                 <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-4 mb-6 flex items-center gap-2"><FileText size={20}/> Contenido & Pie de Página</h2>
                                 <div className="space-y-6">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div>
                                             <label className="block text-sm font-bold text-gray-700 mb-2">Términos y Condiciones</label>
-                                            <textarea className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm h-32" value={settings.termsAndConditions} onChange={(e) => handleChange('termsAndConditions', e.target.value)} />
+                                            <textarea className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm h-32 bg-white text-gray-900" value={settings.termsAndConditions} onChange={(e) => handleChange('termsAndConditions', e.target.value)} />
                                         </div>
                                         <div>
                                             <label className="block text-sm font-bold text-gray-700 mb-2">Métodos de Pago / Banco</label>
-                                            <textarea className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm h-32" value={settings.paymentInfo} onChange={(e) => handleChange('paymentInfo', e.target.value)} />
+                                            <textarea className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm h-32 bg-white text-gray-900" value={settings.paymentInfo} onChange={(e) => handleChange('paymentInfo', e.target.value)} />
                                         </div>
                                     </div>
-                                    
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-50">
                                         <div>
-                                            <label className="block text-sm font-bold text-gray-700 mb-2">Código QR (Pago/Info)</label>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2">Código QR</label>
                                             <div className="flex gap-4 items-center">
                                                 <div className="h-20 w-20 border border-gray-200 rounded-lg bg-gray-50 flex items-center justify-center relative overflow-hidden">
                                                     {settings.qrCodeUrl ? <img src={settings.qrCodeUrl} className="h-full object-contain"/> : <Upload size={20} className="text-gray-400"/>}
                                                     <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" onChange={(e) => handleImageUpload('qrCodeUrl', e)} />
                                                 </div>
-                                                <div className="flex-1">
-                                                    <input type="text" placeholder="URL de la imagen..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs mb-1" value={settings.qrCodeUrl || ''} onChange={(e) => handleChange('qrCodeUrl', e.target.value)} />
-                                                    <p className="text-[10px] text-gray-400">Aparecerá en el pie del documento.</p>
-                                                </div>
+                                                <input type="text" placeholder="URL imagen..." className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-xs bg-white text-gray-900" value={settings.qrCodeUrl || ''} onChange={(e) => handleChange('qrCodeUrl', e.target.value)} />
                                             </div>
                                         </div>
                                         <div>
@@ -360,23 +385,60 @@ export const Settings = () => {
                                                     <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" onChange={(e) => handleImageUpload('signatureUrl', e)} />
                                                 </div>
                                                 <div className="flex-1 space-y-2">
-                                                    <input type="text" placeholder="Nombre Firmante" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-xs" value={settings.signatureName} onChange={(e) => handleChange('signatureName', e.target.value)} />
-                                                    <input type="text" placeholder="Cargo / Título" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-xs" value={settings.signatureTitle} onChange={(e) => handleChange('signatureTitle', e.target.value)} />
+                                                    <input type="text" placeholder="Nombre Firmante" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-900" value={settings.signatureName} onChange={(e) => handleChange('signatureName', e.target.value)} />
+                                                    <input type="text" placeholder="Cargo" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-900" value={settings.signatureTitle} onChange={(e) => handleChange('signatureTitle', e.target.value)} />
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
-
                                     <div>
                                         <label className="block text-sm font-bold text-gray-700 mb-2">Texto Legal (Footer)</label>
-                                        <input type="text" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" value={settings.pdfFooterText} onChange={(e) => handleChange('pdfFooterText', e.target.value)} />
+                                        <input type="text" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-900" value={settings.pdfFooterText} onChange={(e) => handleChange('pdfFooterText', e.target.value)} />
                                     </div>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* USERS */}
+                    {/* FINANCE */}
+                    {activeTab === 'finance' && (
+                        <div className="space-y-6">
+                            <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                                <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Impuestos</h2>
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Impuesto</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.taxName} onChange={(e) => handleChange('taxName', e.target.value)} /></div>
+                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Tasa (%)</label><input type="number" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.taxRate} onChange={(e) => handleChange('taxRate', Number(e.target.value))} /></div>
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                                <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Configuración de Moneda</h2>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Moneda</label>
+                                        <input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.currencyName} onChange={(e) => handleChange('currencyName', e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Símbolo</label>
+                                        <input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.currencySymbol} onChange={(e) => handleChange('currencySymbol', e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Posición del Símbolo</label>
+                                        <select className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.currencyPosition} onChange={(e) => handleChange('currencyPosition', e.target.value as any)}>
+                                            <option value="before">Antes (Bs 100)</option>
+                                            <option value="after">Después (100 Bs)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Decimales</label>
+                                        <input type="number" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.decimals} onChange={(e) => handleChange('decimals', Number(e.target.value))} />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* USERS TAB - Logic Updated */}
                     {activeTab === 'users' && (
                         <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
                             <div className="flex justify-between items-center border-b border-gray-100 pb-4">
@@ -388,45 +450,18 @@ export const Settings = () => {
                                     <div key={u.id} className="flex justify-between items-center p-4 bg-white rounded-xl border border-gray-200 hover:border-brand-300 transition-colors shadow-sm">
                                         <div className="flex items-center gap-4">
                                             <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white ${u.active ? 'bg-brand-900' : 'bg-gray-400'}`}>{u.name.charAt(0)}</div>
-                                            <div><p className="font-bold text-gray-900 flex items-center gap-2">{u.name} {!u.active && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Inactivo</span>}</p><p className="text-xs text-gray-500">{u.email} • {u.role}</p></div>
+                                            <div>
+                                                <p className="font-bold text-gray-900 flex items-center gap-2">
+                                                    {u.name} 
+                                                    {!u.active && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Inactivo</span>}
+                                                    {u.role === 'Admin' && <span className="text-[10px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full border border-purple-200">Admin Total</span>}
+                                                </p>
+                                                <p className="text-xs text-gray-500">{u.email} • {u.role}</p>
+                                            </div>
                                         </div>
                                         <div className="flex gap-2"><button onClick={() => handleEditUser(u)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit3 size={18}/></button><button onClick={() => handleDeleteUser(u.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={18}/></button></div>
                                     </div>
                                 ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* FINANCE */}
-                    {activeTab === 'finance' && (
-                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
-                            <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Finanzas</h2>
-                            <div className="grid grid-cols-2 gap-6">
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Impuesto</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl" value={settings.taxName} onChange={(e) => handleChange('taxName', e.target.value)} /></div>
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Tasa (%)</label><input type="number" className="w-full px-4 py-2 border border-gray-200 rounded-xl" value={settings.taxRate} onChange={(e) => handleChange('taxRate', Number(e.target.value))} /></div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* INTEGRATIONS RESTORED */}
-                    {activeTab === 'integrations' && (
-                        <div className="space-y-6">
-                            <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
-                                <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Conexiones y Datos</h2>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="p-5 bg-green-50 rounded-xl border border-green-100">
-                                        <h3 className="font-bold text-green-800 flex items-center gap-2 mb-3"><MessageSquare size={18}/> WhatsApp API</h3>
-                                        <input type="password" className="w-full px-3 py-2 border border-green-200 rounded-lg bg-white text-sm mb-2" placeholder="Token Meta Developers..." value={waToken} onChange={(e) => setWaToken(e.target.value)} />
-                                        <p className="text-xs text-green-700">Token para envío automático de mensajes.</p>
-                                    </div>
-                                    <div className="p-5 bg-blue-50 rounded-xl border border-blue-100">
-                                        <h3 className="font-bold text-blue-800 flex items-center gap-2 mb-3"><Database size={18}/> Copia de Seguridad</h3>
-                                        <div className="flex gap-2">
-                                            <button onClick={handleExportBackup} className="flex-1 py-2 bg-white text-blue-700 border border-blue-200 rounded-lg text-xs font-bold hover:bg-blue-50 flex items-center justify-center gap-1"><Download size={14}/> Exportar</button>
-                                            <label className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 flex items-center justify-center gap-1 cursor-pointer"><Upload size={14}/> Restaurar <input type="file" className="hidden" accept=".json" onChange={handleImportBackup}/></label>
-                                        </div>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     )}
@@ -436,7 +471,7 @@ export const Settings = () => {
             {/* USER EDIT MODAL */}
             {isUserModalOpen && editingUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in duration-200">
                         <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-white">
                             <h3 className="font-bold text-lg text-gray-900">{editingUser.id ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
                             <button onClick={() => setIsUserModalOpen(false)}><X size={20} className="text-gray-500"/></button>
@@ -448,12 +483,27 @@ export const Settings = () => {
                             </div>
                             <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Email</label><input required type="email" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-brand-900 outline-none text-gray-900" value={editingUser.email} onChange={e => setEditingUser({...editingUser, email: e.target.value})} /></div>
                             
-                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                                <label className="block text-xs font-bold text-gray-500 mb-2 uppercase flex items-center gap-1"><Shield size={12}/> Permisos</label>
-                                <div className="space-y-2">
-                                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer"><input type="checkbox" checked={editingUser.permissions?.includes('delete_records')} onChange={() => togglePermission('delete_records')} className="rounded text-brand-900 focus:ring-brand-900" /> Eliminar Registros</label>
-                                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer"><input type="checkbox" checked={editingUser.permissions?.includes('view_reports')} onChange={() => togglePermission('view_reports')} className="rounded text-brand-900 focus:ring-brand-900" /> Ver Reportes</label>
-                                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer"><input type="checkbox" checked={editingUser.permissions?.includes('manage_settings')} onChange={() => togglePermission('manage_settings')} className="rounded text-brand-900 focus:ring-brand-900" /> Acceso Configuración</label>
+                            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                <div className="flex justify-between items-center mb-3">
+                                    <label className="block text-xs font-bold text-gray-500 uppercase flex items-center gap-1"><Shield size={12}/> Permisos de Acceso</label>
+                                    <div className="text-[10px] text-gray-400">
+                                        {editingUser.role === 'Admin' ? 'Acceso Total (Bloqueado)' : 'Personalizable'}
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 gap-y-3 max-h-48 overflow-y-auto pr-2">
+                                    {availablePermissions.map(perm => {
+                                        const isChecked = editingUser.role === 'Admin' || editingUser.permissions?.includes('all') || editingUser.permissions?.includes(perm.id) || false;
+                                        return (
+                                            <div key={perm.id} className="flex items-center justify-between py-1 hover:bg-gray-100 rounded px-1">
+                                                <span className={`text-xs font-medium ${perm.id.includes('delete') || perm.id.includes('manage') ? 'text-red-700' : 'text-gray-700'}`}>{perm.label}</span>
+                                                <Switch 
+                                                    checked={isChecked} 
+                                                    onChange={() => togglePermission(perm.id)} 
+                                                    disabled={editingUser.role === 'Admin'}
+                                                />
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
 

@@ -65,13 +65,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
       {/* Mobile Backdrop */}
       {mobileMenuOpen && (
         <div 
-          className="fixed inset-0 z-20 bg-brand-900/50 lg:hidden backdrop-blur-sm"
+          className="fixed inset-0 z-40 bg-brand-900/50 lg:hidden backdrop-blur-sm"
           onClick={() => setMobileMenuOpen(false)}
         />
       )}
 
       {/* Sidebar */}
-      <div className={`fixed inset-y-0 left-0 z-30 w-64 transform bg-white border-r border-gray-200 transition-transform duration-200 ease-in-out lg:static lg:translate-x-0 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className={`fixed inset-y-0 left-0 z-50 w-64 transform bg-white border-r border-gray-200 transition-transform duration-300 ease-out lg:static lg:translate-x-0 shadow-2xl lg:shadow-none ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <Sidebar 
             onCloseMobile={() => setMobileMenuOpen(false)} 
             user={user} 
@@ -83,39 +83,39 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         
         {/* Modern Header */}
-        <header className="bg-white border-b border-gray-200 h-20 px-6 flex items-center justify-between shadow-sm z-10 relative">
-            <div className="flex items-center gap-4">
+        <header className="bg-white border-b border-gray-200 h-16 md:h-20 px-4 md:px-6 flex items-center justify-between shadow-sm z-30 relative">
+            <div className="flex items-center gap-3">
                 <button 
                     onClick={() => setMobileMenuOpen(true)}
-                    className="lg:hidden p-2 rounded-xl text-gray-500 hover:bg-gray-100"
+                    className="lg:hidden p-2 rounded-xl text-gray-600 hover:bg-gray-100 active:scale-95 transition-transform"
                 >
                     <Menu size={24} />
                 </button>
                 <div>
-                    <h2 className="text-xl font-bold text-gray-900 leading-none">
-                        Bienvenido a {settings.companyName}
+                    <h2 className="text-lg md:text-xl font-bold text-gray-900 leading-none truncate max-w-[150px] md:max-w-none">
+                        {settings.companyName}
                     </h2>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-[10px] md:text-xs text-gray-500 mt-0.5 hidden sm:block">
                         {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                     </p>
                 </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 md:gap-4">
                 {/* Notifications */}
                 <div className="relative" ref={notifRef}>
                     <button 
                         onClick={() => setNotifOpen(!notifOpen)}
-                        className={`relative p-2.5 rounded-xl transition-colors ${notifOpen ? 'bg-gray-100 text-brand-900' : 'text-gray-400 hover:text-brand-900 hover:bg-gray-50'}`}
+                        className={`relative p-2 rounded-xl transition-colors ${notifOpen ? 'bg-gray-100 text-brand-900' : 'text-gray-400 hover:text-brand-900 hover:bg-gray-50'}`}
                     >
                         <Bell size={20} />
                         {unreadCount > 0 && (
-                            <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
+                            <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
                         )}
                     </button>
 
                     {notifOpen && (
-                        <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
+                        <div className="absolute right-0 top-full mt-2 w-72 md:w-80 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
                             <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                                 <h3 className="font-bold text-sm text-gray-900">Notificaciones</h3>
                                 {unreadCount > 0 && (
@@ -146,9 +146,9 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
                 <div className="relative" ref={profileRef}>
                     <button 
                         onClick={() => setProfileOpen(!profileOpen)}
-                        className={`flex items-center gap-3 pl-1 pr-2 py-1 rounded-xl transition-colors border ${profileOpen ? 'bg-gray-50 border-gray-200' : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
+                        className={`flex items-center gap-2 md:gap-3 pl-1 pr-2 py-1 rounded-xl transition-colors border ${profileOpen ? 'bg-gray-50 border-gray-200' : 'border-transparent hover:bg-gray-50 hover:border-gray-100'}`}
                     >
-                        <div className="w-9 h-9 rounded-full bg-brand-900 text-white flex items-center justify-center font-bold text-sm shadow-md shadow-brand-900/20">
+                        <div className="w-8 h-8 md:w-9 md:h-9 rounded-full bg-brand-900 text-white flex items-center justify-center font-bold text-sm shadow-md shadow-brand-900/20">
                             {user?.name.charAt(0)}
                         </div>
                         <div className="hidden md:block text-left">
@@ -189,7 +189,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
             </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8 bg-[#f4f6f7]">
           {children}
         </main>
       </div>
