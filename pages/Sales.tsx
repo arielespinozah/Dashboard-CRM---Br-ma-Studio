@@ -62,7 +62,6 @@ const convertNumberToWordsEs = (amount: number, currencyName: string) => {
     };
 
     const integerPart = Math.floor(amount);
-    const decimalPart = Math.round((amount - integerPart) * 100);
     
     let words = '';
     if (integerPart === 0) words = 'CERO';
@@ -75,7 +74,7 @@ const convertNumberToWordsEs = (amount: number, currencyName: string) => {
         words = integerPart.toString(); // Fallback for very large numbers
     }
 
-    return `${words} CON ${decimalPart.toString().padStart(2, '0')}/100 ${currencyName.toUpperCase()}`;
+    return `${words} 00/100 ${currencyName.toUpperCase()}`;
 };
 
 export const Sales = () => {
@@ -251,7 +250,7 @@ export const Sales = () => {
       }
   };
   
-  const handleFinalizeSale = () => {
+  const handleFinalizeSale = async () => {
       if (!newSale.clientName) { alert('Seleccione un cliente.'); return; }
       if (!newSale.items || newSale.items.length === 0) { alert('Agregue productos.'); return; }
 
@@ -277,6 +276,39 @@ export const Sales = () => {
           notes: ''
       };
       
+      // --- LOGIC FOR DIRECT PRODUCT DEDUCTION ---
+      if (!editingId) { // Only deduct stock on new sales
+          // 1. Fetch latest inventory to ensure accuracy
+          let currentInventory = [...availableInventory];
+          try {
+              const invDoc = await getDoc(doc(db, 'crm_data', 'inventory'));
+              if(invDoc.exists()) currentInventory = invDoc.data().list as InventoryItem[];
+          } catch(e) {}
+
+          let inventoryUpdated = false;
+
+          // 2. Process deductions (Only for items marked as 'Product' matched by name)
+          newSale.items.forEach(saleItem => {
+              const catalogItem = currentInventory.find(i => i.name === saleItem.description);
+              
+              if (catalogItem && catalogItem.type === 'Product') {
+                  const qtySold = saleItem.quantity;
+                  // Deduct Stock
+                  catalogItem.quantity = Math.max(0, catalogItem.quantity - qtySold);
+                  catalogItem.status = catalogItem.quantity <= 0 ? 'Critical' : (catalogItem.quantity <= catalogItem.minStock ? 'Low Stock' : 'In Stock');
+                  inventoryUpdated = true;
+              }
+          });
+
+          // 3. Save Inventory Update
+          if (inventoryUpdated) {
+              setAvailableInventory(currentInventory);
+              localStorage.setItem('crm_inventory', JSON.stringify(currentInventory));
+              setDoc(doc(db, 'crm_data', 'inventory'), { list: currentInventory }).catch(console.error);
+          }
+      }
+      // ---------------------------------
+
       let updatedSales = [...sales];
       if (editingId) {
           updatedSales = sales.map(s => s.id === editingId ? finalSale : s);
@@ -590,7 +622,7 @@ export const Sales = () => {
                                         })()}
                                     </div>
                                     <div className="w-[45%] text-right">
-                                        <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">De:</p>
+                                        <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">Casa Matriz:</p>
                                         <div className="text-gray-600 text-xs leading-relaxed whitespace-pre-wrap font-medium">
                                             {settings.pdfSenderInfo || `${settings.companyName}\n${settings.address}\n${settings.phone}`}
                                         </div>
@@ -622,7 +654,7 @@ export const Sales = () => {
                                         <div className="mb-6">
                                             <h4 className="font-bold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">El monto de:</h4>
                                             <div className="text-sm font-bold text-gray-700 italic border-l-4 border-gray-300 pl-3 py-1">
-                                                SON: {convertNumberToWordsEs(pdfSale.total, settings.currencyName)}
+                                                {convertNumberToWordsEs(pdfSale.total, settings.currencyName)}
                                             </div>
                                         </div>
                                         

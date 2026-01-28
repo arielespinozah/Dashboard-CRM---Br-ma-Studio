@@ -108,10 +108,12 @@ export interface InventoryItem {
 export interface AppSettings {
   // Dashboard & System
   companyName: string; 
-  primaryColor: string;
+  primaryColor: string; // Used for Dashboard Main Actions & Sidebar Active
+  secondaryColor?: string; // Used for Accents & Icons
+  systemLogoUrl?: string; // LOGO FOR LOGIN & SIDEBAR (Colored)
   
   // PDF Specifics
-  logoUrl?: string; 
+  logoUrl?: string; // LOGO FOR PDF (White/Document version)
   pdfSenderInfo: string; 
   pdfFooterText: string;
   pdfHeaderColor?: string; 
@@ -207,6 +209,12 @@ export interface CalendarEvent {
     type: 'Project' | 'Meeting' | 'Reminder' | 'Other';
     description?: string;
     time?: string;
+    // New Robust Fields
+    priority?: 'Low' | 'Medium' | 'High';
+    linkedClientId?: string;
+    linkedClientName?: string;
+    linkedProjectId?: string;
+    linkedProjectTitle?: string;
 }
 
 export interface AuthContextType {

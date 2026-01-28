@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Clock, Briefcase, CheckCircle2, X, AlertCircle } from 'lucide-react';
-import { Project, CalendarEvent } from '../types';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Clock, Briefcase, CheckCircle2, X, AlertCircle, User, Flag } from 'lucide-react';
+import { Project, CalendarEvent, Client } from '../types';
 import { db } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
@@ -10,33 +10,54 @@ export const Calendar = () => {
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [isEventModalOpen, setIsEventModalOpen] = useState(false);
     
+    // Auxiliary Data for Robustness
+    const [projects, setProjects] = useState<Project[]>([]);
+    const [clients, setClients] = useState<Client[]>([]);
+
     // New Event State
-    const [newEventTitle, setNewEventTitle] = useState('');
-    const [newEventTime, setNewEventTime] = useState('');
-    const [eventType, setEventType] = useState<'Meeting' | 'Reminder' | 'Other'>('Meeting');
+    const [newEvent, setNewEvent] = useState<Partial<CalendarEvent>>({
+        title: '',
+        time: '',
+        type: 'Meeting',
+        description: '',
+        priority: 'Medium',
+        linkedClientId: '',
+        linkedProjectId: ''
+    });
 
     useEffect(() => {
-        const fetchEvents = async () => {
+        const fetchData = async () => {
             let allEvents: CalendarEvent[] = [];
 
-            // 1. Fetch Projects for Deadlines
+            // 1. Fetch Projects
             try {
                 const projDoc = await getDoc(doc(db, 'crm_data', 'projects'));
                 if (projDoc.exists()) {
-                    const projects = projDoc.data().list as Project[];
-                    const projectEvents = projects.map(p => ({
+                    const projList = projDoc.data().list as Project[];
+                    setProjects(projList);
+                    const projectEvents = projList.map(p => ({
                         id: `proj-${p.id}`,
                         title: `Entrega: ${p.title}`,
                         date: p.dueDate.split('T')[0],
                         type: 'Project' as const,
                         description: `Cliente: ${p.client}`,
-                        time: '12:00'
+                        time: '12:00',
+                        priority: 'High' as const,
+                        linkedProjectId: p.id
                     }));
                     allEvents = [...allEvents, ...projectEvents];
                 }
             } catch (e) {}
 
-            // 2. Fetch Manual Events
+            // 2. Fetch Clients
+            try {
+                const clientDoc = await getDoc(doc(db, 'crm_data', 'clients'));
+                if (clientDoc.exists()) {
+                    setClients(clientDoc.data().list);
+                }
+            } catch (e) {}
+
+            // 3. Fetch Manual Events
             try {
                 const calDoc = await getDoc(doc(db, 'crm_data', 'calendar'));
                 if (calDoc.exists()) {
@@ -47,30 +68,34 @@ export const Calendar = () => {
 
             setEvents(allEvents);
         };
-        fetchEvents();
+        fetchData();
     }, []);
 
     const saveCustomEvent = async () => {
-        if (!selectedDate || !newEventTitle) return;
+        if (!selectedDate || !newEvent.title) return;
         
-        const newEvent: CalendarEvent = {
+        const finalEvent: CalendarEvent = {
             id: Math.random().toString(36).substr(2, 9),
-            title: newEventTitle,
+            title: newEvent.title!,
             date: selectedDate.toISOString().split('T')[0],
-            time: newEventTime,
-            type: eventType,
-            description: ''
+            time: newEvent.time,
+            type: newEvent.type as any,
+            description: newEvent.description,
+            priority: newEvent.priority as any,
+            linkedClientId: newEvent.linkedClientId,
+            linkedProjectId: newEvent.linkedProjectId,
+            linkedClientName: clients.find(c => c.id === newEvent.linkedClientId)?.name,
+            linkedProjectTitle: projects.find(p => p.id === newEvent.linkedProjectId)?.title
         };
 
         const customEvents = events.filter(e => e.type !== 'Project');
-        const updatedCustomEvents = [...customEvents, newEvent];
+        const updatedCustomEvents = [...customEvents, finalEvent];
         
         try {
             await setDoc(doc(db, 'crm_data', 'calendar'), { list: updatedCustomEvents });
-            setEvents(prev => [...prev, newEvent]);
+            setEvents(prev => [...prev, finalEvent]);
             setIsEventModalOpen(false);
-            setNewEventTitle('');
-            setNewEventTime('');
+            setNewEvent({ title: '', time: '', type: 'Meeting', description: '', priority: 'Medium', linkedClientId: '', linkedProjectId: '' });
         } catch (e) {
             alert('Error al guardar evento');
         }
@@ -144,7 +169,7 @@ export const Calendar = () => {
                     </div>
                     <div className="space-y-1 overflow-y-auto max-h-[80px] scrollbar-hide">
                         {dayEvents.map(ev => (
-                            <div key={ev.id} className={`text-[10px] px-1.5 py-1 rounded border truncate font-medium flex items-center gap-1.5 ${ev.type === 'Project' ? 'bg-purple-50 text-purple-800 border-purple-100' : ev.type === 'Meeting' ? 'bg-blue-50 text-blue-800 border-blue-100' : 'bg-orange-50 text-orange-800 border-orange-100'}`}>
+                            <div key={ev.id} className={`text-[10px] px-1.5 py-1 rounded border truncate font-medium flex items-center gap-1.5 ${ev.priority === 'High' ? 'bg-red-50 text-red-800 border-red-100' : ev.priority === 'Low' ? 'bg-gray-50 text-gray-600 border-gray-200' : 'bg-blue-50 text-blue-800 border-blue-100'}`}>
                                 {ev.type === 'Project' ? <Briefcase size={10}/> : <Clock size={10}/>}
                                 <span className="truncate">{ev.title}</span>
                             </div>
@@ -218,12 +243,15 @@ export const Calendar = () => {
                             
                             return (
                                 <div key={idx} className="relative pl-4 border-l-2 border-gray-100">
-                                    <div className={`absolute -left-[5px] top-0 w-2.5 h-2.5 rounded-full ${ev.type === 'Project' ? 'bg-purple-500' : 'bg-blue-500'}`}></div>
+                                    <div className={`absolute -left-[5px] top-0 w-2.5 h-2.5 rounded-full ${ev.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
                                     <p className="text-xs font-bold text-gray-400 uppercase mb-1">
                                         {diffDays === 0 ? 'Hoy' : diffDays === 1 ? 'Mañana' : `En ${diffDays} días`} • {date.toLocaleDateString('es-ES', {weekday: 'short', day: 'numeric'})}
                                     </p>
                                     <h4 className="font-bold text-gray-900 text-sm">{ev.title}</h4>
-                                    {ev.time && <p className="text-xs text-gray-500 flex items-center gap-1 mt-1"><Clock size={12}/> {ev.time}</p>}
+                                    <div className="flex flex-wrap gap-2 mt-1">
+                                        {ev.time && <p className="text-xs text-gray-500 flex items-center gap-1"><Clock size={12}/> {ev.time}</p>}
+                                        {ev.linkedClientName && <p className="text-xs text-blue-600 flex items-center gap-1"><User size={12}/> {ev.linkedClientName}</p>}
+                                    </div>
                                     {ev.description && <p className="text-xs text-gray-500 mt-1 bg-gray-50 p-2 rounded border border-gray-100">{ev.description}</p>}
                                 </div>
                             );
@@ -237,38 +265,77 @@ export const Calendar = () => {
                 </div>
             </div>
 
-            {/* Event Modal */}
+            {/* Event Modal - Robust */}
             {isEventModalOpen && selectedDate && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in duration-200">
-                        <div className="flex justify-between items-center mb-4">
+                    <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl animate-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
                             <div>
                                 <h3 className="font-bold text-lg text-gray-900">Nuevo Evento</h3>
-                                <p className="text-xs text-gray-500">{selectedDate.toLocaleDateString()}</p>
+                                <p className="text-xs text-gray-500 flex items-center gap-1"><CalendarIcon size={12}/> {selectedDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
                             </div>
                             <button onClick={() => setIsEventModalOpen(false)}><X size={20} className="text-gray-400"/></button>
                         </div>
-                        <div className="space-y-4">
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div className="md:col-span-2">
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Título del Evento</label>
+                                <input autoFocus className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" placeholder="Reunión, Entrega, Llamada..." value={newEvent.title} onChange={e => setNewEvent({...newEvent, title: e.target.value})} />
+                            </div>
+                            
                             <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Título</label>
-                                <input autoFocus className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" placeholder="Reunión con cliente..." value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} />
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Hora</label>
+                                <input type="time" className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" value={newEvent.time} onChange={e => setNewEvent({...newEvent, time: e.target.value})} />
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Hora</label>
-                                    <input type="time" className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" value={newEventTime} onChange={e => setNewEventTime(e.target.value)} />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo</label>
-                                    <select className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" value={eventType} onChange={e => setEventType(e.target.value as any)}>
-                                        <option value="Meeting">Reunión</option>
-                                        <option value="Reminder">Recordatorio</option>
-                                        <option value="Other">Otro</option>
-                                    </select>
+                            
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo</label>
+                                <select className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}>
+                                    <option value="Meeting">Reunión</option>
+                                    <option value="Reminder">Recordatorio</option>
+                                    <option value="Project">Hito de Proyecto</option>
+                                    <option value="Other">Otro</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Prioridad</label>
+                                <div className="flex gap-2">
+                                    {['Low', 'Medium', 'High'].map(p => (
+                                        <button 
+                                            key={p} 
+                                            onClick={() => setNewEvent({...newEvent, priority: p as any})}
+                                            className={`flex-1 py-1.5 rounded-lg text-xs font-bold border ${newEvent.priority === p ? (p==='High'?'bg-red-50 text-red-600 border-red-200':p==='Medium'?'bg-orange-50 text-orange-600 border-orange-200':'bg-blue-50 text-blue-600 border-blue-200') : 'bg-white text-gray-500 border-gray-200'}`}
+                                        >
+                                            {p === 'Low' ? 'Baja' : p === 'Medium' ? 'Media' : 'Alta'}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
-                            <button onClick={saveCustomEvent} className="w-full bg-brand-900 text-white py-3 rounded-xl font-bold hover:bg-brand-800 shadow-lg">Guardar en Agenda</button>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Vincular Cliente</label>
+                                <select className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" value={newEvent.linkedClientId} onChange={e => setNewEvent({...newEvent, linkedClientId: e.target.value})}>
+                                    <option value="">(Ninguno)</option>
+                                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                            </div>
+
+                            <div className="md:col-span-2">
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Vincular Proyecto</label>
+                                <select className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" value={newEvent.linkedProjectId} onChange={e => setNewEvent({...newEvent, linkedProjectId: e.target.value})}>
+                                    <option value="">(Ninguno)</option>
+                                    {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                                </select>
+                            </div>
+
+                            <div className="md:col-span-2">
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Descripción / Notas</label>
+                                <textarea className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900 h-20 resize-none" placeholder="Detalles adicionales..." value={newEvent.description} onChange={e => setNewEvent({...newEvent, description: e.target.value})} />
+                            </div>
                         </div>
+
+                        <button onClick={saveCustomEvent} className="w-full bg-brand-900 text-white py-3 rounded-xl font-bold hover:bg-brand-800 shadow-lg">Guardar en Agenda</button>
                     </div>
                 </div>
             )}

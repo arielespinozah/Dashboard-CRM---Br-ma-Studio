@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid, DollarSign, RefreshCw } from 'lucide-react';
+import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid, DollarSign, RefreshCw, Layers } from 'lucide-react';
 import { Category, InventoryItem, User } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
@@ -104,7 +104,7 @@ export const Services = () => {
   // --- Actions ---
 
   const handleEdit = (item: InventoryItem) => {
-      setFormData(item);
+      setFormData(JSON.parse(JSON.stringify(item))); // Deep copy
       setEditingId(item.id);
       setIsModalOpen(true);
   };
@@ -162,15 +162,32 @@ export const Services = () => {
       }
   };
 
-  // --- Sharing Logic ---
+  // --- Sharing Logic (Fixed for Emojis) ---
 
   const formatShareText = (item: InventoryItem) => {
-      let prices = `💰 *Precio Unitario:* Bs. ${item.price}\n`;
-      if(item.priceDozen) prices += `📦 *Precio A:* Bs. ${item.priceDozen} c/u\n`;
-      if(item.priceBox) prices += `📦 *Precio B:* Bs. ${item.priceBox} c/u\n`;
-      if(item.priceWholesale) prices += `🏭 *Precio C:* Bs. ${item.priceWholesale} c/u\n`;
+      // Use clean construction to avoid encoding issues
+      const lines = [
+          `✨ *${item.name}* ✨`,
+          '',
+          item.description || 'Sin descripción',
+          '',
+          `🏷️ *Categoría:* ${item.category}`,
+          `💰 *Precio Unitario:* Bs. ${item.price}`,
+      ];
 
-      return `✨ *${item.name}* ✨\n\n📝 ${item.description || 'Sin descripción'}\n\n🏷️ *Categoría:* ${item.category}\n${prices}\n${item.type === 'Product' ? `📦 *Stock:* ${item.quantity} u.\n` : ''}\n📍 *Bráma Studio* - Soluciones Creativas\n📞 Contáctanos para más detalles.`;
+      if(item.priceDozen) lines.push(`📦 *Precio A:* Bs. ${item.priceDozen} c/u`);
+      if(item.priceBox) lines.push(`📦 *Precio B:* Bs. ${item.priceBox} c/u`);
+      if(item.priceWholesale) lines.push(`🏭 *Precio C:* Bs. ${item.priceWholesale} c/u`);
+      
+      if(item.type === 'Product') {
+          lines.push(`📦 *Stock:* ${item.quantity} u.`);
+      }
+
+      lines.push('');
+      lines.push('📍 *Bráma Studio* - Soluciones Creativas');
+      lines.push('📞 Contáctanos para más detalles.');
+
+      return lines.join('\n');
   };
 
   const handleCopy = (item: InventoryItem) => {
@@ -182,7 +199,8 @@ export const Services = () => {
 
   const handleWhatsAppShare = (item: InventoryItem) => {
       const text = formatShareText(item);
-      const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      // Use encodeURIComponent to strictly encode emojis and special chars for URL
+      const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
       window.open(url, '_blank');
   };
 
@@ -286,7 +304,7 @@ export const Services = () => {
                   </div>
                   
                   <h3 className="font-bold text-gray-900 text-xl mb-2">{item.name}</h3>
-                  <p className="text-sm text-gray-600 mb-6 leading-relaxed flex-grow line-clamp-3">{item.description}</p>
+                  <p className="text-sm text-gray-600 mb-6 leading-relaxed flex-grow line-clamp-3 whitespace-pre-wrap">{item.description}</p>
                   
                   {/* Prices Display */}
                   <div className="flex flex-wrap gap-2 mb-4">
@@ -343,7 +361,6 @@ export const Services = () => {
           ))}
       </div>
 
-      {/* ... [Modals remain unchanged] ... */}
       {/* Item Modal */}
       {isModalOpen && canManage && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 overflow-y-auto">
@@ -354,6 +371,7 @@ export const Services = () => {
               </h3>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
+            
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
                <div className="grid grid-cols-2 gap-4">
                    <div>
@@ -382,7 +400,6 @@ export const Services = () => {
                       value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
                </div>
                
-               {/* Pricing Section */}
                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
                    <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2"><DollarSign size={14}/> Precios Escalonados</h4>
                    <div className="grid grid-cols-2 gap-4">
@@ -416,6 +433,7 @@ export const Services = () => {
                           value={formData.quantity} onChange={e => setFormData({...formData, quantity: Number(e.target.value)})} />
                    </div>
                )}
+
                <div className="pt-4 flex gap-3">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors bg-white">Cancelar</button>
                 <button type="submit" className="flex-1 px-4 py-2 bg-brand-600 text-white rounded-xl font-medium hover:bg-brand-700 transition-colors shadow-lg shadow-brand-200">Guardar</button>
@@ -425,7 +443,7 @@ export const Services = () => {
         </div>
       )}
 
-      {/* Category Management Modal */}
+      {/* Category Management Modal (Same as before) */}
       {isCategoryModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">

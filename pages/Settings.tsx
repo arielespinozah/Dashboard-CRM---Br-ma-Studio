@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
-import { Save, Upload, Building, FileText, CreditCard, Users, Trash2, Plus, Check, DollarSign, Database, MessageSquare, Download, Lock, User as UserIcon, Edit3, X, Shield, Printer, Mail, Link as LinkIcon, RefreshCw } from 'lucide-react';
+import { Save, Upload, Building, FileText, CreditCard, Users, Trash2, Plus, Check, DollarSign, Database, MessageSquare, Download, Lock, User as UserIcon, Edit3, X, Shield, Printer, Mail, Link as LinkIcon, RefreshCw, Palette, FileJson, AlertTriangle } from 'lucide-react';
 import { AppSettings, User } from '../types';
 import { db } from '../firebase'; 
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, writeBatch, collection } from 'firebase/firestore';
 import { useSearchParams } from 'react-router-dom';
 
 const defaultSettings: AppSettings = {
@@ -11,6 +12,7 @@ const defaultSettings: AppSettings = {
     website: 'www.brama.com.bo',
     phone: '+591 70000000',
     primaryColor: '#162836', 
+    secondaryColor: '#00f24a',
     pdfHeaderColor: '#162836',
     pdfSenderInfo: 'Bráma Studio\nCalle 27 de Mayo\nSanta Cruz\n+591 70000000',
     pdfFooterText: 'www.brama.com.bo • Calle 27 de Mayo Nro. 113',
@@ -36,11 +38,11 @@ const availablePermissions = [
     { id: 'view_calendar', label: 'Ver Agenda' },
     { id: 'view_finance', label: 'Ver Finanzas' },
     { id: 'view_sales', label: 'Ver/Crear Ventas' },
-    { id: 'delete_sales', label: 'Eliminar Ventas (Riesgo)' }, // New
+    { id: 'delete_sales', label: 'Eliminar Ventas (Riesgo)' },
     { id: 'view_quotes', label: 'Gestionar Cotizaciones' },
     { id: 'view_projects', label: 'Gestionar Proyectos' },
-    { id: 'view_inventory', label: 'Ver Insumos' },
-    { id: 'manage_inventory', label: 'Crear/Borrar Productos' }, // New
+    { id: 'view_inventory', label: 'Ver Inventario' },
+    { id: 'manage_inventory', label: 'Crear/Borrar Productos' },
     { id: 'view_catalog', label: 'Ver Catálogo' },
     { id: 'view_clients', label: 'Ver Clientes' },
     { id: 'view_reports', label: 'Ver Reportes' },
@@ -121,6 +123,9 @@ export const Settings = () => {
             const cleanSettings = JSON.parse(JSON.stringify(settings));
             localStorage.setItem('crm_settings', JSON.stringify(cleanSettings));
             
+            // Dispatch custom event to notify other components (Sidebar, etc.) immediately
+            window.dispatchEvent(new Event('crm_settings_updated'));
+            
             const cleanUsers = JSON.parse(JSON.stringify(users));
             localStorage.setItem('crm_users', JSON.stringify(cleanUsers));
 
@@ -137,7 +142,7 @@ export const Settings = () => {
         }
     };
 
-    const handleImageUpload = (field: 'logoUrl' | 'qrCodeUrl' | 'signatureUrl', e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleImageUpload = (field: 'logoUrl' | 'systemLogoUrl' | 'qrCodeUrl' | 'signatureUrl', e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
             const reader = new FileReader();
@@ -148,7 +153,7 @@ export const Settings = () => {
         }
     };
 
-    // --- USER MGMT ---
+    // --- USER MGMT HANDLERS (Same as before) ---
     const handleEditUser = (user: User) => {
         setEditingUser({ ...user, password: user.password || '' });
         setIsUserModalOpen(true);
@@ -239,6 +244,114 @@ export const Settings = () => {
         setTimeout(() => setShowToast(null), 3000);
     };
 
+    // --- BACKUP & RESTORE LOGIC ---
+    const handleBackup = async () => {
+        const backupData: any = {
+            metadata: {
+                version: '1.0',
+                date: new Date().toISOString(),
+                appName: 'BramaStudioCRM'
+            },
+            data: {}
+        };
+
+        const collections = ['settings', 'users', 'clients', 'inventory', 'sales_history', 'quotes', 'projects', 'calendar', 'finance_shifts', 'categories'];
+        
+        // 1. Gather Data
+        for (const col of collections) {
+            // Try local storage first as backup
+            const local = localStorage.getItem(`crm_${col}`);
+            if (local) {
+                backupData.data[col] = JSON.parse(local);
+            }
+            
+            // Try cloud to get latest
+            try {
+                const snap = await getDoc(doc(db, 'crm_data', col));
+                if (snap.exists()) {
+                    backupData.data[col] = snap.data().list ? snap.data().list : snap.data(); // Handle both lists and raw objects like settings
+                }
+            } catch(e) {}
+        }
+
+        // Special handling for Settings structure (it's not a list)
+        if (backupData.data['settings'] && backupData.data['settings'].list) {
+             delete backupData.data['settings']; // Should not happen based on logic above but safety check
+        }
+
+        // 2. Create File
+        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `backup_brama_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    const handleRestore = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if(!confirm("ADVERTENCIA: Esta acción REEMPLAZARÁ toda la información actual del sistema con la del archivo de respaldo. ¿Estás seguro de continuar?")) {
+            e.target.value = '';
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const json = JSON.parse(event.target?.result as string);
+                if (!json.metadata || json.metadata.appName !== 'BramaStudioCRM') {
+                    throw new Error("Archivo de respaldo inválido.");
+                }
+
+                setIsSaving(true);
+                const data = json.data;
+
+                // Restore logic
+                const collections = ['settings', 'users', 'clients', 'inventory', 'sales_history', 'quotes', 'projects', 'calendar', 'finance_shifts', 'categories'];
+                
+                for (const col of collections) {
+                    if (data[col]) {
+                        // 1. Update LocalStorage
+                        if (col === 'settings') {
+                            localStorage.setItem(`crm_${col}`, JSON.stringify(data[col]));
+                            setSettings(data[col]); // Live update state
+                        } else {
+                            // Data lists
+                            const list = Array.isArray(data[col]) ? data[col] : (data[col].list || []);
+                            localStorage.setItem(`crm_${col}`, JSON.stringify(list));
+                            if (col === 'users') setUsers(list);
+                        }
+
+                        // 2. Update Firebase
+                        try {
+                            if (col === 'settings') {
+                                await setDoc(doc(db, 'crm_data', col), data[col]);
+                            } else {
+                                const list = Array.isArray(data[col]) ? data[col] : (data[col].list || []);
+                                await setDoc(doc(db, 'crm_data', col), { list });
+                            }
+                        } catch (err) {
+                            console.error(`Failed to restore ${col} to cloud`, err);
+                        }
+                    }
+                }
+
+                setShowToast({ message: "Sistema restaurado correctamente. Recargando...", type: 'success' });
+                setTimeout(() => window.location.reload(), 2000);
+
+            } catch (err: any) {
+                setShowToast({ message: `Error al restaurar: ${err.message}`, type: 'error' });
+                setIsSaving(false);
+            }
+        };
+        reader.readAsText(file);
+    };
+
     return (
         <div className="max-w-6xl mx-auto space-y-6 pb-12 relative text-gray-900">
             {showToast && (
@@ -255,9 +368,11 @@ export const Settings = () => {
                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Configuración</h1>
                     <p className="text-sm text-gray-500">Administra el sistema</p>
                 </div>
-                <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 px-6 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg active:scale-95 disabled:opacity-50">
-                    {isSaving ? <RefreshCw className="animate-spin" size={18}/> : <Save size={18} />} {isSaving ? 'Guardando...' : 'Guardar Cambios'}
-                </button>
+                {activeTab !== 'backup' && (
+                    <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 px-6 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg active:scale-95 disabled:opacity-50">
+                        {isSaving ? <RefreshCw className="animate-spin" size={18}/> : <Save size={18} />} {isSaving ? 'Guardando...' : 'Guardar Cambios'}
+                    </button>
+                )}
             </div>
 
             <div className="flex flex-col md:flex-row gap-8">
@@ -267,10 +382,11 @@ export const Settings = () => {
                     <button onClick={() => setActiveTab('profile')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'profile' ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}`}><UserIcon size={18} /> Mi Perfil</button>
                     <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-6">Sistema</p>
                     {[
-                        { id: 'company', icon: Building, label: 'Empresa' },
+                        { id: 'company', icon: Building, label: 'Empresa & App' },
                         { id: 'pdf', icon: Printer, label: 'Documentos PDF' },
                         { id: 'users', icon: Users, label: 'Usuarios' },
-                        { id: 'finance', icon: DollarSign, label: 'Finanzas' },
+                        { id: 'finance', icon: DollarSign, label: 'Moneda e Impuestos' },
+                        { id: 'backup', icon: Database, label: 'Respaldo de Datos' },
                     ].map((tab) => (
                         <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}`}>
                             <tab.icon size={18} /> {tab.label}
@@ -291,30 +407,45 @@ export const Settings = () => {
                         </div>
                     )}
 
-                    {/* COMPANY */}
+                    {/* COMPANY & APP VISUALS */}
                     {activeTab === 'company' && (
-                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
-                            <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Datos Generales & Logo</h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Comercial</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.companyName} onChange={(e) => handleChange('companyName', e.target.value)} /></div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Color Principal</label>
-                                    <div className="flex gap-2"><input type="color" className="h-10 w-12 rounded cursor-pointer border-none" value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} /><input type="text" className="flex-1 px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} /></div>
+                        <div className="space-y-6">
+                            <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                                <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Datos Generales</h2>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Comercial</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.companyName} onChange={(e) => handleChange('companyName', e.target.value)} /></div>
+                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Sitio Web</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.website} onChange={(e) => handleChange('website', e.target.value)} /></div>
                                 </div>
                             </div>
-                            {/* Logo Upload Section reused/shared with PDF, but users can see it here too */}
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-2">Logo del Sistema (Login y Menú)</label>
-                                <div className="flex items-center gap-4">
-                                    <div className="h-20 w-20 border border-gray-200 rounded-xl bg-gray-50 flex items-center justify-center relative overflow-hidden group">
-                                        {settings.logoUrl ? <img src={settings.logoUrl} className="h-full object-contain" alt="Logo"/> : <Upload size={24} className="text-gray-400"/>}
-                                        <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" onChange={(e) => handleImageUpload('logoUrl', e)} />
+
+                            <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                                <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2"><Palette size={20}/> Personalización del Dashboard</h2>
+                                <p className="text-xs text-gray-500">Define los colores y el logo que se mostrarán en la interfaz del sistema (Login y Menú).</p>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Color Principal (Menú/Botones)</label>
+                                        <div className="flex gap-2"><input type="color" className="h-10 w-12 rounded cursor-pointer border-none" value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} /><input type="text" className="flex-1 px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.primaryColor} onChange={(e) => handleChange('primaryColor', e.target.value)} /></div>
                                     </div>
-                                    <div className="flex-1">
-                                        <p className="text-xs text-gray-500 mb-2">Este logo reemplazará el icono y texto por defecto en el menú lateral y pantalla de inicio.</p>
-                                        <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-white">
-                                            <LinkIcon size={14} className="text-gray-400"/>
-                                            <input type="text" placeholder="O pegar URL de imagen..." className="flex-1 text-xs outline-none text-gray-700 bg-white" value={settings.logoUrl || ''} onChange={(e) => handleChange('logoUrl', e.target.value)} />
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Color Secundario (Iconos/Detalles)</label>
+                                        <div className="flex gap-2"><input type="color" className="h-10 w-12 rounded cursor-pointer border-none" value={settings.secondaryColor || '#00f24a'} onChange={(e) => handleChange('secondaryColor', e.target.value)} /><input type="text" className="flex-1 px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.secondaryColor || '#00f24a'} onChange={(e) => handleChange('secondaryColor', e.target.value)} /></div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-2">Logo del Sistema (Versión Color)</label>
+                                    <div className="flex items-center gap-4">
+                                        <div className="h-24 w-24 border border-gray-200 rounded-xl bg-white flex items-center justify-center relative overflow-hidden group shadow-sm">
+                                            {settings.systemLogoUrl ? <img src={settings.systemLogoUrl} className="h-full object-contain p-2" alt="System Logo"/> : <Upload size={24} className="text-gray-400"/>}
+                                            <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" onChange={(e) => handleImageUpload('systemLogoUrl', e)} />
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-xs text-gray-500 mb-2">Recomendado: Logo en formato PNG con fondo transparente. Se usará en el Login y Menú Lateral.</p>
+                                            <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-white">
+                                                <LinkIcon size={14} className="text-gray-400"/>
+                                                <input type="text" placeholder="URL imagen..." className="flex-1 text-xs outline-none text-gray-700 bg-white" value={settings.systemLogoUrl || ''} onChange={(e) => handleChange('systemLogoUrl', e.target.value)} />
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -326,15 +457,21 @@ export const Settings = () => {
                     {activeTab === 'pdf' && (
                         <div className="space-y-6">
                             <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
-                                <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-4 mb-6 flex items-center gap-2"><Building size={20}/> Estilo & Cabecera</h2>
+                                <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-4 mb-6 flex items-center gap-2"><Building size={20}/> Estilo de Documentos</h2>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                     <div>
-                                        <label className="block text-sm font-bold text-gray-700 mb-2">Logo Documentos</label>
-                                        <div className="flex flex-col gap-3">
-                                            <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 flex flex-col items-center justify-center bg-gray-50 h-32 relative overflow-hidden group">
-                                                {settings.logoUrl ? <img src={settings.logoUrl} className="h-full object-contain" alt="Logo"/> : <div className="text-gray-400 flex flex-col items-center"><Upload size={24}/><span className="text-xs mt-2">Subir Imagen</span></div>}
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">Logo para PDF (Versión Blanco/Claro)</label>
+                                        <div className="space-y-3">
+                                            <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 flex flex-col items-center justify-center bg-gray-800 h-32 relative overflow-hidden group hover:border-gray-400 transition-colors">
+                                                {settings.logoUrl ? <img src={settings.logoUrl} className="h-full object-contain p-2" alt="PDF Logo"/> : <div className="text-gray-400 flex flex-col items-center"><Upload size={24}/><span className="text-xs mt-2">Subir Archivo</span></div>}
                                                 <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" accept="image/*" onChange={(e) => handleImageUpload('logoUrl', e)} />
                                             </div>
+                                            
+                                            <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 bg-white">
+                                                <LinkIcon size={14} className="text-gray-400 flex-shrink-0"/>
+                                                <input type="text" placeholder="O pega un enlace directo a la imagen..." className="flex-1 text-xs outline-none text-gray-700 bg-white" value={settings.logoUrl || ''} onChange={(e) => handleChange('logoUrl', e.target.value)} />
+                                            </div>
+                                            <p className="text-[10px] text-gray-500">Este logo se usará sobre el fondo de color en la cabecera de las cotizaciones y recibos.</p>
                                         </div>
                                     </div>
                                     <div className="space-y-4">
@@ -354,6 +491,7 @@ export const Settings = () => {
                             </div>
 
                             <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                                {/* ... Rest of PDF Section ... */}
                                 <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-4 mb-6 flex items-center gap-2"><FileText size={20}/> Contenido & Pie de Página</h2>
                                 <div className="space-y-6">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -438,7 +576,52 @@ export const Settings = () => {
                         </div>
                     )}
                     
-                    {/* USERS TAB - Logic Updated */}
+                    {/* BACKUP TAB */}
+                    {activeTab === 'backup' && (
+                        <div className="space-y-6">
+                            <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm text-center">
+                                <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <Database size={40} className="text-blue-600"/>
+                                </div>
+                                <h2 className="text-xl font-bold text-gray-900 mb-2">Respaldo y Restauración</h2>
+                                <p className="text-gray-500 mb-8 max-w-lg mx-auto">
+                                    Genera una copia de seguridad completa de tus clientes, ventas, inventario y configuraciones. 
+                                    Útil para migrar de dispositivo o prevenir pérdida de datos.
+                                </p>
+                                
+                                <div className="flex flex-col sm:flex-row justify-center gap-4">
+                                    <button onClick={handleBackup} className="flex items-center justify-center gap-2 px-6 py-4 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 shadow-lg hover:shadow-xl transition-all">
+                                        <Download size={20}/> Descargar Copia de Seguridad
+                                    </button>
+                                    
+                                    <div className="relative">
+                                        <input 
+                                            type="file" 
+                                            accept=".json" 
+                                            onChange={handleRestore}
+                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                        />
+                                        <button className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-white border-2 border-dashed border-gray-300 text-gray-600 rounded-xl font-bold hover:bg-gray-50 hover:border-gray-400 transition-all">
+                                            <Upload size={20}/> Restaurar desde Archivo
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div className="mt-8 pt-6 border-t border-gray-100 flex items-start gap-3 text-left bg-yellow-50 p-4 rounded-xl">
+                                    <AlertTriangle className="text-yellow-600 flex-shrink-0" size={20}/>
+                                    <div>
+                                        <h4 className="font-bold text-yellow-800 text-sm">Advertencia sobre Restauración</h4>
+                                        <p className="text-xs text-yellow-700 mt-1">
+                                            Al restaurar un archivo, <strong>toda la información actual será reemplazada</strong> por la del respaldo. 
+                                            Asegúrate de que el archivo provenga de una fuente confiable.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* USERS TAB */}
                     {activeTab === 'users' && (
                         <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
                             <div className="flex justify-between items-center border-b border-gray-100 pb-4">
@@ -477,6 +660,7 @@ export const Settings = () => {
                             <button onClick={() => setIsUserModalOpen(false)}><X size={20} className="text-gray-500"/></button>
                         </div>
                         <form onSubmit={handleSaveUser} className="p-6 space-y-5 bg-white text-gray-900">
+                            {/* ... User Form Fields ... */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Nombre</label><input required className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-brand-900 outline-none text-gray-900" value={editingUser.name} onChange={e => setEditingUser({...editingUser, name: e.target.value})} /></div>
                                 <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Rol</label><select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-brand-900 outline-none text-gray-900" value={editingUser.role} onChange={e => setEditingUser({...editingUser, role: e.target.value as any})}><option value="Sales">Vendedor</option><option value="Admin">Admin</option></select></div>

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './Sidebar';
-import { Menu, Bell, ChevronDown, User as UserIcon, LogOut, Settings, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
-import { User, AppSettings } from '../types';
+import { Menu, Bell, ChevronDown, User as UserIcon, LogOut, Settings, CheckCircle2, AlertTriangle, Info, Clock, Calendar } from 'lucide-react';
+import { User, AppSettings, CalendarEvent, Project, Status } from '../types';
 import { Link, useNavigate } from 'react-router-dom';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -26,23 +28,106 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
   const navigate = useNavigate();
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Load basic settings for the welcome message
+  // Load basic settings
   const [settings] = useState<AppSettings>(() => {
       const s = localStorage.getItem('crm_settings');
       return s ? JSON.parse(s) : { companyName: 'Bráma Studio' };
   });
 
-  // Mock Notifications
-  const [notifications, setNotifications] = useState<Notification[]>([
-      { id: '1', title: 'Nuevo Lead', message: 'Juan Perez se ha registrado.', type: 'success', read: false, time: 'Hace 5 min' },
-      { id: '2', title: 'Stock Bajo', message: 'Tinta Negra está por agotarse.', type: 'warning', read: false, time: 'Hace 1 hora' },
-      { id: '3', title: 'Sistema', message: 'Copia de seguridad realizada.', type: 'info', read: true, time: 'Ayer' },
-  ]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  // Clock Timer
+  useEffect(() => {
+      const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+      return () => clearInterval(timer);
+  }, []);
+
+  // Fetch Real Notifications
+  useEffect(() => {
+      const fetchNotifications = async () => {
+          let newNotifs: Notification[] = [];
+          
+          // 1. Calendar Events (Today/Tomorrow)
+          try {
+              let events: CalendarEvent[] = [];
+              const calDoc = await getDoc(doc(db, 'crm_data', 'calendar'));
+              if(calDoc.exists()) events = calDoc.data().list;
+              else {
+                  const local = localStorage.getItem('crm_data_calendar'); // Backup
+                  if(local) events = JSON.parse(local).list || [];
+              }
+
+              const now = new Date();
+              const todayStr = now.toISOString().split('T')[0];
+              const tomorrow = new Date(now);
+              tomorrow.setDate(tomorrow.getDate() + 1);
+              const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+              events.forEach(ev => {
+                  if (ev.date === todayStr) {
+                      newNotifs.push({
+                          id: `ev-${ev.id}`,
+                          title: 'Agenda: Hoy',
+                          message: `${ev.title} a las ${ev.time || 'todo el día'}`,
+                          type: 'info',
+                          read: false,
+                          time: 'Hoy'
+                      });
+                  } else if (ev.date === tomorrowStr) {
+                      newNotifs.push({
+                          id: `ev-${ev.id}`,
+                          title: 'Agenda: Mañana',
+                          message: `${ev.title}`,
+                          type: 'info',
+                          read: false,
+                          time: 'Mañana'
+                      });
+                  }
+              });
+          } catch(e) {}
+
+          // 2. Project Deadlines (Next 3 days)
+          try {
+              let projects: Project[] = [];
+              const projDoc = await getDoc(doc(db, 'crm_data', 'projects'));
+              if(projDoc.exists()) projects = projDoc.data().list;
+              
+              const now = new Date();
+              projects.forEach(p => {
+                  if(p.status !== Status.COMPLETED) {
+                      const due = new Date(p.dueDate);
+                      const diffTime = due.getTime() - now.getTime();
+                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                      
+                      if (diffDays >= 0 && diffDays <= 3) {
+                          newNotifs.push({
+                              id: `proj-${p.id}`,
+                              title: 'Entrega de Proyecto',
+                              message: `"${p.title}" vence en ${diffDays} días.`,
+                              type: 'warning',
+                              read: false,
+                              time: diffDays === 0 ? 'Hoy' : `${diffDays} días`
+                          });
+                      }
+                  }
+              });
+          } catch(e) {}
+
+          // Fallback if empty
+          if(newNotifs.length === 0) {
+              // Optional: Add a system welcome
+          }
+          
+          setNotifications(newNotifs);
+      };
+
+      fetchNotifications();
+  }, []);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  // Close dropdowns on outside click
   useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
           if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
@@ -95,9 +180,14 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
                     <h2 className="text-lg md:text-xl font-bold text-gray-900 leading-none truncate max-w-[150px] md:max-w-none">
                         {settings.companyName}
                     </h2>
-                    <p className="text-[10px] md:text-xs text-gray-500 mt-0.5 hidden sm:block">
-                        {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-[10px] md:text-xs text-gray-500 hidden sm:block">
+                            {currentTime.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                        </p>
+                        <span className="text-[10px] md:text-xs font-mono text-brand-900 bg-gray-100 px-1.5 rounded hidden sm:block">
+                            {currentTime.toLocaleTimeString()}
+                        </span>
+                    </div>
                 </div>
             </div>
 
@@ -117,7 +207,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
                     {notifOpen && (
                         <div className="absolute right-0 top-full mt-2 w-72 md:w-80 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
                             <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                                <h3 className="font-bold text-sm text-gray-900">Notificaciones</h3>
+                                <h3 className="font-bold text-sm text-gray-900">Recordatorios</h3>
                                 {unreadCount > 0 && (
                                     <button onClick={handleMarkAsRead} className="text-[10px] text-blue-600 hover:underline font-medium">Marcar leídas</button>
                                 )}
@@ -126,16 +216,16 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
                                 {notifications.length > 0 ? notifications.map(n => (
                                     <div key={n.id} className={`p-3 border-b border-gray-50 hover:bg-gray-50 transition-colors flex gap-3 ${!n.read ? 'bg-blue-50/30' : ''}`}>
                                         <div className={`mt-1 flex-shrink-0 ${n.type === 'success' ? 'text-green-500' : n.type === 'warning' ? 'text-orange-500' : 'text-blue-500'}`}>
-                                            {n.type === 'success' ? <CheckCircle2 size={16}/> : n.type === 'warning' ? <AlertTriangle size={16}/> : <Info size={16}/>}
+                                            {n.title.includes('Agenda') ? <Calendar size={16}/> : n.type === 'warning' ? <AlertTriangle size={16}/> : <Info size={16}/>}
                                         </div>
                                         <div>
                                             <p className="text-sm font-bold text-gray-800">{n.title}</p>
                                             <p className="text-xs text-gray-600 leading-snug">{n.message}</p>
-                                            <p className="text-[10px] text-gray-400 mt-1">{n.time}</p>
+                                            <p className="text-[10px] text-gray-400 mt-1 flex items-center gap-1"><Clock size={10}/> {n.time}</p>
                                         </div>
                                     </div>
                                 )) : (
-                                    <div className="p-8 text-center text-gray-400 text-sm">No tienes notificaciones.</div>
+                                    <div className="p-8 text-center text-gray-400 text-sm">No tienes recordatorios pendientes.</div>
                                 )}
                             </div>
                         </div>

@@ -13,7 +13,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [syncStatus, setSyncStatus] = useState<'loading' | 'success' | 'error'>('loading');
+    
+    // Dynamic Settings
     const [logoUrl, setLogoUrl] = useState<string | null>(null);
+    const [primaryColor, setPrimaryColor] = useState('#162836');
+    const [companyName, setCompanyName] = useState('Bráma Studio');
 
     const syncUsers = async () => {
         setSyncStatus('loading');
@@ -29,21 +33,24 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 }
             }
 
-            // Fetch Settings for Logo
+            // Fetch Settings for Logo & Colors
             const settingsRef = doc(db, 'crm_data', 'settings');
             const settingsSnap = await getDoc(settingsRef);
             if (settingsSnap.exists()) {
                 const s = settingsSnap.data();
-                if(s.logoUrl) {
-                    setLogoUrl(s.logoUrl);
-                    localStorage.setItem('crm_settings', JSON.stringify(s));
-                }
+                if(s.systemLogoUrl) setLogoUrl(s.systemLogoUrl);
+                if(s.primaryColor) setPrimaryColor(s.primaryColor);
+                if(s.companyName) setCompanyName(s.companyName);
+                
+                localStorage.setItem('crm_settings', JSON.stringify(s));
             } else {
                 // Fallback to local
                 const localSettings = localStorage.getItem('crm_settings');
                 if (localSettings) {
                     const parsed = JSON.parse(localSettings);
-                    if (parsed.logoUrl) setLogoUrl(parsed.logoUrl);
+                    if (parsed.systemLogoUrl) setLogoUrl(parsed.systemLogoUrl);
+                    if (parsed.primaryColor) setPrimaryColor(parsed.primaryColor);
+                    if (parsed.companyName) setCompanyName(parsed.companyName);
                 }
             }
 
@@ -69,6 +76,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         if (storedUsers) {
             users = JSON.parse(storedUsers);
         } else {
+            // Fallback default admin if no DB connection yet
             users = [
                 { id: '1', name: 'Admin Principal', email: 'admin@brama.com.bo', role: 'Admin', active: true },
                 { id: '2', name: 'Vendedor 1', email: 'ventas@brama.com.bo', role: 'Sales', active: true }
@@ -99,7 +107,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-[#f4f6f7] p-4">
-            <div className="bg-white w-full max-w-md p-8 rounded-3xl shadow-2xl shadow-brand-900/10 border border-gray-100 relative overflow-hidden">
+            <div className="bg-white w-full max-w-md p-8 rounded-3xl shadow-2xl border border-gray-100 relative overflow-hidden" style={{ boxShadow: `0 25px 50px -12px ${primaryColor}20` }}>
                 {/* Sync Status Indicator */}
                 <div className={`absolute top-0 left-0 w-full h-1 ${syncStatus === 'loading' ? 'bg-blue-500 animate-pulse' : syncStatus === 'success' ? 'bg-green-500' : 'bg-red-500'}`}></div>
                 
@@ -108,10 +116,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                         <img src={logoUrl} alt="Logo" className="h-24 w-auto object-contain mb-4" />
                     ) : (
                         <>
-                            <div className="w-16 h-16 bg-brand-900 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-brand-900/30 mx-auto mb-4">
+                            <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-white shadow-lg mx-auto mb-4" style={{ backgroundColor: primaryColor }}>
                                 <PenTool size={32} />
                             </div>
-                            <h1 className="text-2xl font-bold text-brand-900">Bráma Studio</h1>
+                            <h1 className="text-2xl font-bold" style={{ color: primaryColor }}>{companyName}</h1>
                         </>
                     )}
                     <p className="text-gray-500 text-sm mt-2">Ingresa a tu espacio de trabajo</p>
@@ -136,8 +144,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                                 type="email" 
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
-                                className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 focus:border-transparent outline-none transition-all text-brand-900"
-                                placeholder="nombre@brama.com.bo"
+                                className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:border-transparent outline-none transition-all text-gray-900"
+                                style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
+                                placeholder="nombre@empresa.com"
                                 required
                             />
                         </div>
@@ -151,7 +160,8 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                                 type="password" 
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 focus:border-transparent outline-none transition-all text-brand-900"
+                                className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:border-transparent outline-none transition-all text-gray-900"
+                                style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
                                 placeholder="••••••••"
                                 required
                             />
@@ -167,7 +177,8 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     <button 
                         type="submit" 
                         disabled={syncStatus === 'loading'}
-                        className={`w-full bg-brand-900 text-white py-3.5 rounded-xl font-bold hover:bg-brand-800 transition-all shadow-lg shadow-brand-900/20 flex items-center justify-center gap-2 group ${syncStatus === 'loading' ? 'opacity-70 cursor-wait' : ''}`}
+                        className={`w-full text-white py-3.5 rounded-xl font-bold transition-all shadow-lg flex items-center justify-center gap-2 group ${syncStatus === 'loading' ? 'opacity-70 cursor-wait' : 'hover:opacity-90 active:scale-95'}`}
+                        style={{ backgroundColor: primaryColor, boxShadow: `0 10px 15px -3px ${primaryColor}40` }}
                     >
                         {syncStatus === 'loading' ? 'Cargando...' : 'Iniciar Sesión'}
                         {syncStatus !== 'loading' && <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />}
@@ -175,8 +186,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 </form>
 
                 <div className="mt-8 text-center text-xs text-gray-400">
-                    <p>Credenciales por defecto:</p>
-                    <p>admin@brama.com.bo / admin</p>
+                    <p>Desarrollado por {companyName}</p>
                 </div>
             </div>
         </div>

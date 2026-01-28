@@ -138,7 +138,7 @@ export const Reports = () => {
                         <button className="text-gray-400 hover:text-brand-900"><ArrowRight size={20}/></button>
                     </div>
                     {/* Explicit height wrapper to prevent Recharts -1 warning */}
-                    <div style={{ width: '100%', height: 350 }}>
+                    <div className="w-full h-[350px] min-h-[350px]">
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={weekData}>
                                 <defs>
@@ -166,7 +166,7 @@ export const Reports = () => {
                         <h3 className="font-bold text-gray-900 text-lg">Top Productos</h3>
                         <button className="text-gray-400 hover:text-brand-900"><ArrowRight size={20}/></button>
                     </div>
-                    <div style={{ width: '100%', height: 350 }}>
+                    <div className="w-full h-[350px] min-h-[350px]">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={topProducts} layout="vertical" margin={{ left: 20 }}>
                                 <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />

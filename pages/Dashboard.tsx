@@ -165,8 +165,8 @@ export const Dashboard = () => {
                 <p className="text-sm text-gray-400">Comportamiento últimos 6 meses</p>
             </div>
           </div>
-          {/* Explicit height wrapper to prevent Recharts -1 warning */}
-          <div style={{ width: '100%', height: 350 }}>
+          {/* Strict height using Tailwind classes to prevent -1 warning */}
+          <div className="w-full h-[350px] min-h-[350px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} barSize={40}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
