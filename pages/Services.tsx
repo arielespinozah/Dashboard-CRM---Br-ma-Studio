@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid, DollarSign, RefreshCw, Layers, ChevronRight, List } from 'lucide-react';
+import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid, DollarSign, RefreshCw, Layers, ChevronRight, List as ListIcon, LayoutGrid, MoreHorizontal } from 'lucide-react';
 import { Category, InventoryItem, User } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
@@ -31,6 +31,7 @@ export const Services = () => {
   const canManage = currentUser?.role === 'Admin' || currentUser?.permissions?.includes('all') || currentUser?.permissions?.includes('manage_inventory');
 
   const [activeTab, setActiveTab] = useState<'Service' | 'Product'>('Service');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -83,14 +84,16 @@ export const Services = () => {
   }, [items, isLoaded]);
 
   // --- Logic ---
-  const handleEdit = (item: InventoryItem) => {
+  const handleEdit = (item: InventoryItem, e?: React.MouseEvent) => {
+      e?.stopPropagation();
       setFormData(JSON.parse(JSON.stringify(item)));
       setEditingId(item.id);
       setIsModalOpen(true);
       setSelectedItem(null); // Close drawer to edit
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = (id: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
       if(confirm('¿Eliminar ítem del catálogo?')) {
           setItems(prev => prev.filter(i => i.id !== id));
           if(selectedItem?.id === id) setSelectedItem(null);
@@ -158,14 +161,16 @@ export const Services = () => {
       return lines.join('\n');
   };
 
-  const handleCopy = (item: InventoryItem) => {
+  const handleCopy = (item: InventoryItem, e?: React.MouseEvent) => {
+      e?.stopPropagation();
       const text = formatShareText(item);
       navigator.clipboard.writeText(text);
       setCopiedId(item.id);
       setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleWhatsAppShare = (item: InventoryItem) => {
+  const handleWhatsAppShare = (item: InventoryItem, e?: React.MouseEvent) => {
+      e?.stopPropagation();
       const text = formatShareText(item);
       const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
       window.open(url, '_blank');
@@ -180,17 +185,23 @@ export const Services = () => {
   });
 
   return (
-    <div className="space-y-6 h-full flex flex-col relative">
+    <div className="space-y-6 h-full flex flex-col relative pb-safe-area">
        {/* Header */}
-       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Catálogo</h1>
           <p className="text-sm text-gray-500">Administra y comparte tus servicios y productos</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
             {!isLoaded && <span className="text-xs text-brand-900 flex items-center gap-1"><RefreshCw className="animate-spin" size={12}/> Sync</span>}
-            <button onClick={() => setIsCategoryModalOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
-                <Grid size={16} /> Categorías
+            
+            <div className="flex bg-gray-100 p-1 rounded-xl mr-1">
+                <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><LayoutGrid size={18}/></button>
+                <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><ListIcon size={18}/></button>
+            </div>
+
+            <button onClick={() => setIsCategoryModalOpen(true)} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+                <Grid size={16} /> <span className="hidden sm:inline">Categorías</span>
             </button>
             {canManage && (
                 <button onClick={openNew} disabled={!isLoaded} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg transition-all active:scale-95 disabled:opacity-50">
@@ -203,15 +214,15 @@ export const Services = () => {
       {/* Tabs & Filter */}
       <div className="flex flex-col md:flex-row gap-4 justify-between items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm">
           <div className="flex p-1 bg-gray-100 rounded-lg w-full md:w-auto">
-              <button onClick={() => { setActiveTab('Service'); setSelectedCategory('All'); }} className={`flex-1 md:flex-none px-6 py-1.5 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'Service' ? 'bg-white text-brand-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              <button onClick={() => { setActiveTab('Service'); setSelectedCategory('All'); }} className={`flex-1 md:flex-none px-6 py-1.5 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'Service' ? 'bg-white text-brand-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                   <Briefcase size={16}/> Servicios
               </button>
-              <button onClick={() => { setActiveTab('Product'); setSelectedCategory('All'); }} className={`flex-1 md:flex-none px-6 py-1.5 rounded-md text-sm font-bold transition-all flex items-center gap-2 ${activeTab === 'Product' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-orange-600'}`}>
+              <button onClick={() => { setActiveTab('Product'); setSelectedCategory('All'); }} className={`flex-1 md:flex-none px-6 py-1.5 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'Product' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-orange-600'}`}>
                   <Package size={16}/> Productos
               </button>
           </div>
           <div className="flex gap-2 w-full md:w-auto">
-              <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} className="px-3 py-2 bg-gray-50 border border-transparent focus:bg-white focus:border-brand-200 rounded-lg text-sm outline-none transition-all text-gray-700">
+              <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} className="px-3 py-2 bg-gray-50 border border-transparent focus:bg-white focus:border-brand-200 rounded-lg text-sm outline-none transition-all text-gray-700 cursor-pointer">
                   <option value="All">Todas</option>
                   {categories.filter(c => c.type === activeTab).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
               </select>
@@ -222,56 +233,108 @@ export const Services = () => {
           </div>
       </div>
 
-      {/* COMPACT LIST VIEW */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex-1">
-          <table className="w-full text-left border-collapse">
-              <thead className="bg-gray-50/50 border-b border-gray-100">
-                  <tr>
-                      <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Nombre</th>
-                      <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Categoría</th>
-                      <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase text-right">Precio Unit.</th>
-                      {activeTab === 'Product' && <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase text-center">Stock</th>}
-                      <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase text-right">Acciones</th>
-                  </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
+      {/* CONTENT AREA */}
+      <div className="flex-1 overflow-y-auto pb-20">
+          {viewMode === 'list' ? (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                        <thead className="bg-gray-50/50 border-b border-gray-100">
+                            <tr>
+                                <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Nombre</th>
+                                <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Categoría</th>
+                                <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase text-right">Precio Unit.</th>
+                                {activeTab === 'Product' && <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase text-center">Stock</th>}
+                                <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase text-right">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                            {filteredItems.map(item => (
+                                <tr key={item.id} onClick={() => setSelectedItem(item)} className={`hover:bg-gray-50 cursor-pointer transition-colors ${selectedItem?.id === item.id ? 'bg-brand-50/30' : ''}`}>
+                                    <td className="px-6 py-4">
+                                        <p className="font-bold text-gray-900 text-sm">{item.name}</p>
+                                        {item.description && <p className="text-xs text-gray-400 truncate max-w-[200px]">{item.description}</p>}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold uppercase">{item.category}</span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <span className="font-mono font-bold text-brand-900 text-sm">Bs. {item.price}</span>
+                                    </td>
+                                    {activeTab === 'Product' && (
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${item.quantity <= (item.minStock || 5) ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
+                                                {item.quantity} u.
+                                            </span>
+                                        </td>
+                                    )}
+                                    <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                                        <div className="flex justify-end gap-1">
+                                            <button onClick={(e) => handleWhatsAppShare(item, e)} className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors" title="Compartir"><Share2 size={16}/></button>
+                                            <button onClick={(e) => handleCopy(item, e)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded transition-colors" title="Copiar">{copiedId === item.id ? <Check size={16} className="text-green-600"/> : <Copy size={16}/>}</button>
+                                            {canManage && (
+                                                <>
+                                                    <button onClick={(e) => handleEdit(item, e)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Editar"><Edit3 size={16}/></button>
+                                                    <button onClick={(e) => handleDelete(item.id, e)} className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Eliminar"><Trash2 size={16}/></button>
+                                                </>
+                                            )}
+                                            <button onClick={() => setSelectedItem(item)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors"><ChevronRight size={16}/></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            {filteredItems.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-gray-400 text-sm">No se encontraron ítems.</td></tr>}
+                        </tbody>
+                    </table>
+                  </div>
+              </div>
+          ) : (
+              // GRID VIEW
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                   {filteredItems.map(item => (
-                      <tr key={item.id} onClick={() => setSelectedItem(item)} className={`hover:bg-gray-50 cursor-pointer transition-colors ${selectedItem?.id === item.id ? 'bg-brand-50/30' : ''}`}>
-                          <td className="px-6 py-4">
-                              <p className="font-bold text-gray-900 text-sm">{item.name}</p>
-                              {item.description && <p className="text-xs text-gray-400 truncate max-w-[200px]">{item.description}</p>}
-                          </td>
-                          <td className="px-6 py-4">
-                              <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold uppercase">{item.category}</span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                              <span className="font-mono font-bold text-brand-900 text-sm">Bs. {item.price}</span>
-                          </td>
-                          {activeTab === 'Product' && (
-                              <td className="px-6 py-4 text-center">
-                                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${item.quantity <= (item.minStock || 5) ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
-                                      {item.quantity} u.
-                                  </span>
-                              </td>
-                          )}
-                          <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex justify-end gap-1">
-                                  <button onClick={() => handleWhatsAppShare(item)} className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors" title="Compartir"><Share2 size={16}/></button>
-                                  <button onClick={() => handleCopy(item)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded transition-colors" title="Copiar">{copiedId === item.id ? <Check size={16} className="text-green-600"/> : <Copy size={16}/>}</button>
+                      <div key={item.id} onClick={() => setSelectedItem(item)} className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:shadow-lg transition-all cursor-pointer group flex flex-col h-full relative hover:ring-1 hover:ring-brand-500/30">
+                          {/* Card Header */}
+                          <div className="flex justify-between items-start mb-3">
+                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider bg-gray-50 px-2 py-1 rounded border border-gray-100">{item.category}</span>
+                              <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                   {canManage && (
                                       <>
-                                          <button onClick={() => handleEdit(item)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Editar"><Edit3 size={16}/></button>
-                                          <button onClick={() => handleDelete(item.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Eliminar"><Trash2 size={16}/></button>
+                                          <button onClick={(e) => handleEdit(item, e)} className="p-1.5 bg-gray-50 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-md transition-colors"><Edit3 size={14}/></button>
+                                          <button onClick={(e) => handleDelete(item.id, e)} className="p-1.5 bg-gray-50 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-md transition-colors"><Trash2 size={14}/></button>
                                       </>
                                   )}
-                                  <button onClick={() => setSelectedItem(item)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors"><ChevronRight size={16}/></button>
                               </div>
-                          </td>
-                      </tr>
+                          </div>
+                          
+                          {/* Card Body */}
+                          <div className="flex-1 mb-4">
+                              <h3 className="font-bold text-gray-900 text-lg leading-tight mb-1 line-clamp-2">{item.name}</h3>
+                              <p className="text-xs text-gray-500 line-clamp-2 h-8">{item.description || 'Sin descripción disponible.'}</p>
+                          </div>
+
+                          {/* Card Footer */}
+                          <div className="mt-auto border-t border-gray-100 pt-3 flex items-center justify-between">
+                              <div>
+                                  <p className="text-xs text-gray-400 font-bold uppercase mb-0.5">Precio</p>
+                                  <p className="text-lg font-bold text-brand-900">Bs. {item.price}</p>
+                              </div>
+                              <div className="flex flex-col items-end gap-2">
+                                  {activeTab === 'Product' && (
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.quantity <= (item.minStock || 5) ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
+                                          {item.quantity} u.
+                                      </span>
+                                  )}
+                                  <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                      <button onClick={(e) => handleWhatsAppShare(item, e)} className="p-1.5 bg-green-50 text-green-600 hover:bg-green-100 rounded-lg transition-colors" title="Compartir"><Share2 size={16}/></button>
+                                      <button onClick={(e) => handleCopy(item, e)} className="p-1.5 bg-gray-50 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Copiar">{copiedId === item.id ? <Check size={16}/> : <Copy size={16}/>}</button>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
                   ))}
-                  {filteredItems.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-gray-400 text-sm">No se encontraron ítems.</td></tr>}
-              </tbody>
-          </table>
+                  {filteredItems.length === 0 && <div className="col-span-full text-center py-20 text-gray-400"><p>No se encontraron registros.</p></div>}
+              </div>
+          )}
       </div>
 
       {/* DETAILS DRAWER */}

@@ -237,13 +237,27 @@ export const Clients = () => {
         {filteredClients.map(client => (
           <div key={client.id} onClick={() => { setSelectedClient(client); setDrawerTab('Info'); }} className={`bg-white rounded-xl p-4 border transition-all cursor-pointer group hover:shadow-md ${selectedClient?.id === client.id ? 'border-brand-500 ring-1 ring-brand-200 bg-brand-50/10' : 'border-gray-100 hover:border-brand-200'}`}>
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-                <div className="col-span-12 md:col-span-4 flex items-center gap-4">
+                <div className="col-span-1 md:col-span-4 flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-gray-100 flex-shrink-0 flex items-center justify-center text-gray-600 font-bold border border-gray-200">{client.name.charAt(0)}</div>
-                    <div className="min-w-0"><h3 className="font-bold text-gray-900 text-sm truncate">{client.name}</h3><p className="text-xs text-gray-500 truncate">{client.company || 'Particular'}</p></div>
+                    <div className="min-w-0">
+                        <h3 className="font-bold text-gray-900 text-sm truncate">{client.name}</h3>
+                        <p className="text-xs text-gray-500 truncate">{client.company || 'Particular'}</p>
+                    </div>
                 </div>
+                
+                {/* Mobile: Show contact info in a cleaner way */}
+                <div className="col-span-1 md:col-span-3 flex md:hidden flex-col gap-1 mt-1">
+                     <div className="flex items-center text-xs text-gray-600"><Mail size={12} className="mr-2 text-gray-400"/>{client.email || 'No email'}</div>
+                     <div className="flex items-center text-xs text-gray-600"><Phone size={12} className="mr-2 text-gray-400"/>{client.phone || 'No telf.'}</div>
+                </div>
+
                 <div className="hidden md:flex col-span-3 items-center text-xs text-gray-600 font-medium truncate"><Mail size={14} className="text-gray-300 mr-2 flex-shrink-0"/><span className="truncate">{client.email || '---'}</span></div>
                 <div className="hidden md:flex col-span-3 items-center text-xs text-gray-600 font-medium truncate"><Phone size={14} className="text-gray-300 mr-2 flex-shrink-0"/><span className="truncate">{client.phone || '---'}</span></div>
-                <div className="col-span-12 md:col-span-2 flex items-center justify-between md:justify-end gap-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${client.type === 'Client' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>{client.type === 'Client' ? 'Cliente' : 'Prospecto'}</span><ChevronRight size={18} className="text-gray-300 group-hover:text-brand-900 transition-colors"/></div>
+                
+                <div className="col-span-1 md:col-span-2 flex items-center justify-between md:justify-end gap-3 mt-2 md:mt-0 pt-2 md:pt-0 border-t md:border-0 border-gray-50">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${client.type === 'Client' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>{client.type === 'Client' ? 'Cliente' : 'Prospecto'}</span>
+                    <ChevronRight size={18} className="text-gray-300 group-hover:text-brand-900 transition-colors hidden md:block"/>
+                </div>
             </div>
           </div>
         ))}

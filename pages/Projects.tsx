@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Calendar, Trash2, X, Edit3, CheckCircle2, Circle, Clock, Share2, ExternalLink, User, Settings2, GripVertical } from 'lucide-react';
+import { Plus, Calendar, Trash2, X, Edit3, CheckCircle2, Circle, Clock, Share2, ExternalLink, User, GripVertical, LayoutGrid, List as ListIcon, MoreHorizontal, ArrowRight, AlertCircle, Copy, Check } from 'lucide-react';
 import { Project, Status, Priority, ProjectStage, Client } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
@@ -23,10 +23,11 @@ export const Projects = () => {
       return saved ? JSON.parse(saved) : [];
   });
 
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   
   const [formData, setFormData] = useState<Partial<Project>>({
     title: '', client: '', priority: Priority.MEDIUM, status: Status.PLANNED, budget: 0, category: 'Design', dueDate: new Date().toISOString().split('T')[0], stages: []
@@ -63,7 +64,7 @@ export const Projects = () => {
       fetchFromCloud();
   }, []);
 
-  // --- Handlers (AddStage, RemoveStage, etc.) ---
+  // --- Handlers ---
   const handleAddStage = () => {
       const newStage: ProjectStage = { id: Math.random().toString(36).substr(2, 5), name: 'Nueva Etapa', status: 'Pending' };
       setFormData(prev => ({ ...prev, stages: [...(prev.stages || []), newStage] }));
@@ -123,7 +124,7 @@ export const Projects = () => {
     setIsModalOpen(false);
   };
 
-  const toggleStage = (projectId: string, stageId: string) => {
+  const toggleStageStatus = (projectId: string, stageId: string) => {
       let updatedProject: Project | null = null;
       const updatedProjects = projects.map(p => {
           if (p.id === projectId) {
@@ -146,10 +147,24 @@ export const Projects = () => {
           return p;
       });
       saveProjects(updatedProjects);
-      // Update activeProject state immediately to reflect changes in UI/Modal
       if (updatedProject && activeProject?.id === projectId) {
           setActiveProject(updatedProject);
       }
+  };
+
+  const handleUpdateDate = (projectId: string, newDate: string) => {
+      const updatedProjects = projects.map(p => p.id === projectId ? { ...p, dueDate: newDate } : p);
+      saveProjects(updatedProjects);
+      if (activeProject?.id === projectId) {
+          setActiveProject({ ...activeProject, dueDate: newDate });
+      }
+  };
+
+  const handleCopyLink = (token: string) => {
+      const link = `${window.location.origin}${window.location.pathname}#/p/${token}`;
+      navigator.clipboard.writeText(link);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
   };
 
   const calculateProgress = (stages: ProjectStage[]) => {
@@ -167,121 +182,113 @@ export const Projects = () => {
       }
   };
 
-  const ClientViewModal = () => {
-      if (!activeProject) return null;
-      const progress = calculateProgress(activeProject.stages);
-      
-      return (
-          <div className="fixed inset-0 z-[100] bg-brand-900/90 backdrop-blur-md flex items-center justify-center p-4">
-              <div className="bg-white w-full max-w-3xl rounded-3xl overflow-hidden shadow-2xl animate-in zoom-in duration-300 flex flex-col md:flex-row h-[650px]">
-                  <div className="w-full md:w-1/3 bg-gray-50 p-8 border-r border-gray-200 flex flex-col">
-                      <div className="mb-8">
-                          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Vista del Cliente</h3>
-                          <h2 className="text-2xl font-bold text-brand-900 leading-tight mb-2">{activeProject.title}</h2>
-                          <div className="flex items-center gap-2 text-sm text-gray-600 font-medium bg-white p-2 rounded-lg border border-gray-200">
-                              <User size={16} className="text-brand-500"/> {activeProject.client}
-                          </div>
-                      </div>
-                      
-                      <div className="mb-auto space-y-4">
-                          <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                              <p className="text-xs text-gray-400 font-bold uppercase mb-1">Entrega Estimada</p>
-                              <div className="flex items-center gap-2 text-brand-900 font-bold text-lg">
-                                  <Calendar size={20} className="text-brand-500" />
-                                  {new Date(activeProject.dueDate).toLocaleDateString()}
-                              </div>
-                          </div>
-                      </div>
-
-                      <div className="pt-6 border-t border-gray-200">
-                          <p className="text-[10px] text-gray-500 font-bold text-center mb-2 uppercase">Link de seguimiento</p>
-                          <div className="flex items-center bg-white border border-gray-300 rounded-lg p-2 gap-2 shadow-inner">
-                              <input readOnly value={`brama.studio/p/${activeProject.clientViewToken}`} className="text-xs flex-1 bg-transparent outline-none text-gray-700 font-mono" />
-                              <button className="text-brand-900 hover:text-brand-700 p-1 hover:bg-gray-100 rounded"><Share2 size={14}/></button>
-                          </div>
-                      </div>
-                  </div>
-
-                  <div className="w-full md:w-2/3 p-8 overflow-y-auto bg-white">
-                      <div className="flex justify-between items-end mb-8 border-b border-gray-100 pb-4">
-                          <div>
-                              <h2 className="text-xl font-bold text-gray-900">Progreso del Proyecto</h2>
-                              <p className="text-sm text-gray-500">Actualizado en tiempo real</p>
-                          </div>
-                          <span className="text-4xl font-black text-brand-900 tracking-tighter">{progress}%</span>
-                      </div>
-                      
-                      <div className="space-y-0 relative pl-2">
-                          <div className="absolute left-[27px] top-4 bottom-4 w-0.5 bg-gray-200"></div>
-                          {activeProject.stages.map((stage, idx) => (
-                              <div key={idx} className="relative z-10 flex gap-5 pb-8 last:pb-0 group">
-                                  <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 border-white shadow-md flex-shrink-0 transition-all duration-500 ${stage.status === 'Completed' ? 'bg-green-500 text-white scale-110' : stage.status === 'In Progress' ? 'bg-brand-900 text-white scale-110 ring-4 ring-brand-100' : 'bg-gray-100 text-gray-300'}`}>
-                                      {stage.status === 'Completed' ? <CheckCircle2 size={20}/> : stage.status === 'In Progress' ? <Clock size={20} className="animate-pulse"/> : <Circle size={16}/>}
-                                  </div>
-                                  <div className="pt-1 flex-1">
-                                      <div className="flex justify-between items-center mb-1">
-                                          <h4 className={`font-bold text-base ${stage.status === 'Pending' ? 'text-gray-400' : 'text-gray-900'}`}>{stage.name}</h4>
-                                          {stage.status === 'In Progress' && <span className="text-[10px] bg-brand-100 text-brand-900 px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-brand-200">En Curso</span>}
-                                          {stage.status === 'Completed' && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border border-green-200">Listo</span>}
-                                      </div>
-                                      <p className="text-sm text-gray-500">
-                                          {stage.status === 'Completed' ? 'Esta etapa ha sido finalizada y aprobada.' : stage.status === 'In Progress' ? 'Estamos trabajando activamente en esta fase.' : 'Programada para iniciar próximamente.'}
-                                      </p>
-                                  </div>
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-                  <button onClick={() => setIsShareModalOpen(false)} className="absolute top-4 right-4 p-2 rounded-full text-white/50 hover:text-white bg-black/20 hover:bg-black/40 backdrop-blur transition-all"><X size={20}/></button>
-              </div>
-          </div>
-      );
-  };
-
   return (
-    <div className="space-y-6 h-full flex flex-col">
-        {/* Header and Grid - Same as before */}
+    <div className="space-y-6 h-full flex flex-col relative pb-safe-area">
+        {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
             <div>
                 <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Proyectos</h1>
                 <p className="text-sm text-gray-500">Gestión de entregas y flujo de trabajo</p>
             </div>
-            <button onClick={openNewProject} className="flex items-center gap-2 bg-brand-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-800 transition-all shadow-lg active:scale-95">
-                <Plus size={18} /> Nuevo Proyecto
-            </button>
+            <div className="flex items-center gap-2">
+                <div className="flex bg-gray-100 p-1 rounded-xl mr-2">
+                    <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><LayoutGrid size={18}/></button>
+                    <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><ListIcon size={18}/></button>
+                </div>
+                <button onClick={openNewProject} className="flex items-center gap-2 bg-brand-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-800 transition-all shadow-lg active:scale-95">
+                    <Plus size={18} /> Nuevo
+                </button>
+            </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-8">
-            {projects.map(project => {
-                const progress = calculateProgress(project.stages);
-                return (
-                    <div key={project.id} onClick={() => setActiveProject(project)} className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:shadow-lg transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden ring-1 ring-gray-100 hover:ring-brand-500/30">
-                        <div className={`absolute top-0 left-0 w-full h-1.5 ${project.priority === Priority.HIGH ? 'bg-red-500' : project.priority === Priority.MEDIUM ? 'bg-orange-400' : 'bg-green-400'}`}></div>
-                        <div className="flex justify-between items-start mb-3 mt-2">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest bg-gray-100 px-2 py-1 rounded-md border border-gray-200">{project.category}</span>
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white shadow-sm rounded-lg p-0.5 border border-gray-100">
-                                <button onClick={(e) => handleEdit(project, e)} className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-md transition-colors"><Edit3 size={14}/></button>
-                                <button onClick={(e) => handleDelete(project.id, e)} className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-md transition-colors"><Trash2 size={14}/></button>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
+            {projects.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50/50">
+                    <p className="text-gray-500 font-medium mb-4">No hay proyectos activos.</p>
+                    <button onClick={openNewProject} className="text-brand-900 font-bold hover:underline">Crear el primero</button>
+                </div>
+            ) : viewMode === 'grid' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
+                    {projects.map(project => {
+                        const progress = calculateProgress(project.stages);
+                        return (
+                            <div key={project.id} onClick={() => setActiveProject(project)} className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:shadow-lg transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden ring-1 ring-gray-100 hover:ring-brand-500/30">
+                                <div className={`absolute top-0 left-0 w-full h-1.5 ${project.priority === Priority.HIGH ? 'bg-red-500' : project.priority === Priority.MEDIUM ? 'bg-orange-400' : 'bg-green-400'}`}></div>
+                                <div className="flex justify-between items-start mb-3 mt-2">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest bg-gray-100 px-2 py-1 rounded-md border border-gray-200">{project.category}</span>
+                                    <div className="flex gap-1">
+                                        <button onClick={(e) => handleEdit(project, e)} className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-md transition-colors"><Edit3 size={14}/></button>
+                                        <button onClick={(e) => handleDelete(project.id, e)} className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-md transition-colors"><Trash2 size={14}/></button>
+                                    </div>
+                                </div>
+                                <h3 className="font-bold text-gray-900 text-lg mb-1 leading-snug line-clamp-2">{project.title}</h3>
+                                <p className="text-sm text-gray-500 mb-6 line-clamp-1 flex items-center gap-1"><User size={14}/> {project.client}</p>
+                                <div className="mt-auto bg-gray-50 rounded-xl p-3 border border-gray-100">
+                                    <div className="flex justify-between text-xs mb-2 font-bold text-gray-700"><span>Progreso</span><span>{progress}%</span></div>
+                                    <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden mb-3">
+                                        <div className={`h-full transition-all duration-700 ease-out rounded-full ${progress === 100 ? 'bg-green-500' : 'bg-brand-900'}`} style={{ width: `${progress}%` }}></div>
+                                    </div>
+                                    <div className="flex items-center justify-between text-xs pt-2 border-t border-gray-200">
+                                        <div className={`flex items-center gap-1.5 font-medium ${new Date(project.dueDate) < new Date() && project.status !== Status.COMPLETED ? 'text-red-600' : 'text-gray-600'}`}><Calendar size={14} />{new Date(project.dueDate).toLocaleDateString()}</div>
+                                        {project.budget > 0 && <span className="text-gray-900 font-bold">Bs. {project.budget}</span>}
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                        <h3 className="font-bold text-gray-900 text-lg mb-1 leading-snug line-clamp-2">{project.title}</h3>
-                        <p className="text-sm text-gray-500 mb-6 line-clamp-1 flex items-center gap-1"><User size={14}/> {project.client}</p>
-                        <div className="mt-auto bg-gray-50 rounded-xl p-3 border border-gray-100">
-                            <div className="flex justify-between text-xs mb-2 font-bold text-gray-700"><span>Progreso</span><span>{progress}%</span></div>
-                            <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden mb-3">
-                                <div className={`h-full transition-all duration-700 ease-out rounded-full ${progress === 100 ? 'bg-green-500' : 'bg-brand-900'}`} style={{ width: `${progress}%` }}></div>
-                            </div>
-                            <div className="flex items-center justify-between text-xs pt-2 border-t border-gray-200">
-                                <div className={`flex items-center gap-1.5 font-medium ${new Date(project.dueDate) < new Date() && project.status !== Status.COMPLETED ? 'text-red-600' : 'text-gray-600'}`}><Calendar size={14} />{new Date(project.dueDate).toLocaleDateString()}</div>
-                                {project.budget > 0 && <span className="text-gray-900 font-bold">Bs. {project.budget}</span>}
-                            </div>
-                        </div>
+                        );
+                    })}
+                </div>
+            ) : (
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-bold">
+                                <tr>
+                                    <th className="px-6 py-4">Proyecto</th>
+                                    <th className="px-6 py-4">Cliente</th>
+                                    <th className="px-6 py-4">Prioridad</th>
+                                    <th className="px-6 py-4 w-1/4">Progreso</th>
+                                    <th className="px-6 py-4">Entrega</th>
+                                    <th className="px-6 py-4 text-right">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                                {projects.map(project => {
+                                    const progress = calculateProgress(project.stages);
+                                    return (
+                                        <tr key={project.id} onClick={() => setActiveProject(project)} className="hover:bg-gray-50 cursor-pointer group transition-colors">
+                                            <td className="px-6 py-4">
+                                                <p className="font-bold text-gray-900 text-sm">{project.title}</p>
+                                                <span className="text-[10px] text-gray-500 uppercase bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">{project.category}</span>
+                                            </td>
+                                            <td className="px-6 py-4 text-sm text-gray-600">{project.client}</td>
+                                            <td className="px-6 py-4">
+                                                <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase border ${getPriorityColor(project.priority)}`}>{project.priority}</span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="h-2 flex-1 bg-gray-200 rounded-full overflow-hidden">
+                                                        <div className={`h-full transition-all duration-500 ${progress === 100 ? 'bg-green-500' : 'bg-brand-900'}`} style={{ width: `${progress}%` }}></div>
+                                                    </div>
+                                                    <span className="text-xs font-bold text-gray-700">{progress}%</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 text-sm text-gray-600">{new Date(project.dueDate).toLocaleDateString()}</td>
+                                            <td className="px-6 py-4 text-right">
+                                                <button onClick={(e) => handleEdit(project, e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit3 size={16}/></button>
+                                                <button onClick={(e) => handleDelete(project.id, e)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
                     </div>
-                );
-            })}
-            {projects.length === 0 && <div className="col-span-full py-20 text-center border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50/50"><p className="text-gray-500 font-medium">No hay proyectos activos.</p><button onClick={openNewProject} className="mt-4 text-brand-900 font-bold hover:underline">Crear el primero</button></div>}
+                </div>
+            )}
         </div>
 
+        {/* Project Details Drawer (Admin Control Center) */}
         {activeProject && (
             <div className="fixed inset-y-0 right-0 w-full md:w-[500px] bg-white shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300 border-l border-gray-200">
                 <div className="p-6 border-b border-gray-200 flex justify-between items-start bg-gray-50">
@@ -295,24 +302,59 @@ export const Projects = () => {
                     </div>
                     <button onClick={() => setActiveProject(null)} className="p-2 hover:bg-gray-200 rounded-full text-gray-500 transition-colors"><X size={20}/></button>
                 </div>
-                <div className="p-5 border-b border-gray-200 bg-white">
-                    <button onClick={() => setIsShareModalOpen(true)} className="w-full py-3 bg-brand-900 text-white rounded-xl font-bold text-sm hover:bg-brand-800 transition-all shadow-lg shadow-brand-900/20 flex items-center justify-center gap-2 border border-brand-900"><ExternalLink size={18}/> Ver Vista de Cliente</button>
+                
+                <div className="p-5 border-b border-gray-200 bg-white space-y-4">
+                    {/* Public Link Share */}
+                    <div className="bg-brand-50 p-4 rounded-xl border border-brand-100">
+                        <div className="flex justify-between items-center mb-2">
+                            <h4 className="text-sm font-bold text-brand-900 flex items-center gap-2"><ExternalLink size={16}/> Enlace Público para Cliente</h4>
+                            <span className="text-[10px] text-brand-700 bg-white px-2 py-0.5 rounded-full border border-brand-100">Solo Lectura</span>
+                        </div>
+                        <div className="flex gap-2">
+                            <input readOnly value={`${window.location.origin}${window.location.pathname}#/p/${activeProject.clientViewToken}`} className="flex-1 text-xs bg-white border border-brand-200 rounded-lg px-3 py-2 text-gray-600 outline-none select-all" />
+                            <button onClick={() => handleCopyLink(activeProject.clientViewToken!)} className="bg-brand-900 text-white px-3 rounded-lg hover:bg-brand-800 transition-colors">
+                                {linkCopied ? <Check size={16}/> : <Copy size={16}/>}
+                            </button>
+                        </div>
+                        <p className="text-[10px] text-brand-600/70 mt-2 leading-tight">
+                            Comparte este enlace con tu cliente. Podrá ver el progreso en tiempo real sin acceder al sistema.
+                        </p>
+                    </div>
+
+                    {/* Date Control */}
+                    <div className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-200">
+                        <div className="flex items-center gap-2">
+                            <Calendar size={18} className="text-gray-500"/>
+                            <div>
+                                <p className="text-xs font-bold text-gray-900 uppercase">Fecha de Entrega</p>
+                                <p className="text-[10px] text-gray-500">Modificar si es necesario</p>
+                            </div>
+                        </div>
+                        <input 
+                            type="date" 
+                            className="bg-white border border-gray-300 rounded-lg px-2 py-1 text-sm text-gray-900 outline-none focus:border-brand-900"
+                            value={activeProject.dueDate}
+                            onChange={(e) => handleUpdateDate(activeProject.id, e.target.value)}
+                        />
+                    </div>
                 </div>
+
                 <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30">
-                    <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><CheckCircle2 size={18} className="text-brand-600"/> Etapas del Proyecto</h3>
+                    <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2 text-sm uppercase tracking-wider"><CheckCircle2 size={18} className="text-brand-600"/> Control de Etapas</h3>
                     <div className="space-y-4 relative">
                         <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-gray-200"></div>
                         {activeProject.stages.map((stage) => (
-                            <div key={stage.id} onClick={() => toggleStage(activeProject.id, stage.id)} className={`relative pl-10 cursor-pointer group transition-all select-none`}>
+                            <div key={stage.id} onClick={() => toggleStageStatus(activeProject.id, stage.id)} className={`relative pl-10 cursor-pointer group transition-all select-none`}>
                                 <div className={`absolute left-0 top-0 w-8 h-8 rounded-full flex items-center justify-center border-4 border-white shadow-sm transition-colors z-10 ${stage.status === 'Completed' ? 'bg-green-500 text-white' : stage.status === 'In Progress' ? 'bg-brand-900 text-white' : 'bg-gray-200 text-gray-400'}`}>
                                     {stage.status === 'Completed' && <CheckCircle2 size={14}/>}
                                     {stage.status === 'In Progress' && <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>}
                                 </div>
-                                <div className={`p-4 rounded-xl border transition-all bg-white ${stage.status === 'Completed' ? 'border-green-200 bg-green-50/50' : stage.status === 'In Progress' ? 'border-brand-500 shadow-md ring-1 ring-brand-100' : 'border-gray-200 hover:border-gray-300'}`}>
-                                    <div className="flex justify-between items-center">
-                                        <span className={`font-bold text-sm ${stage.status === 'Completed' ? 'text-green-800 line-through' : 'text-gray-900'}`}>{stage.name}</span>
-                                        <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-lg border ${stage.status === 'Completed' ? 'bg-white text-green-700 border-green-200' : stage.status === 'In Progress' ? 'bg-brand-50 text-brand-900 border-brand-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>{stage.status === 'Completed' ? 'Listo' : stage.status === 'In Progress' ? 'Actual' : 'Pendiente'}</span>
+                                <div className={`p-4 rounded-xl border transition-all bg-white flex justify-between items-center group-hover:shadow-md ${stage.status === 'Completed' ? 'border-green-200 bg-green-50/50' : stage.status === 'In Progress' ? 'border-brand-500 ring-1 ring-brand-100' : 'border-gray-200 hover:border-brand-300'}`}>
+                                    <div>
+                                        <span className={`font-bold text-sm block ${stage.status === 'Completed' ? 'text-green-800 line-through' : 'text-gray-900'}`}>{stage.name}</span>
+                                        <span className="text-[10px] text-gray-500">{stage.status === 'Completed' ? 'Finalizado' : stage.status === 'In Progress' ? 'Trabajando...' : 'Haga clic para iniciar'}</span>
                                     </div>
+                                    <div className={`w-4 h-4 rounded-full border-2 ${stage.status === 'Completed' ? 'bg-green-500 border-green-500' : 'border-gray-300'}`}></div>
                                 </div>
                             </div>
                         ))}
@@ -321,6 +363,7 @@ export const Projects = () => {
             </div>
         )}
 
+        {/* Modal Form (New/Edit) - Kept mostly same but ensures clean logic */}
         {isModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-8 animate-in fade-in zoom-in duration-200">
@@ -329,6 +372,7 @@ export const Projects = () => {
                         <button onClick={() => setIsModalOpen(false)} className="text-gray-500 hover:text-gray-900 bg-white p-1 rounded-full border border-gray-200"><X size={20}/></button>
                     </div>
                     <form onSubmit={handleSubmit} className="p-6 space-y-5">
+                        {/* Form Inputs (Same as before) */}
                         <div><label className="block text-xs font-bold text-gray-700 uppercase mb-1.5">Título del Proyecto</label><input required type="text" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white text-gray-900 focus:ring-2 focus:ring-brand-900/20 focus:border-brand-900 outline-none transition-all" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} placeholder="Ej. Branding Corporativo"/></div>
                         <div>
                             <label className="block text-xs font-bold text-gray-700 uppercase mb-1.5">Cliente</label>
@@ -342,6 +386,8 @@ export const Projects = () => {
                             <div><label className="block text-xs font-bold text-gray-700 uppercase mb-1.5">Presupuesto (Bs.)</label><input type="number" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white text-gray-900 outline-none" value={formData.budget} onChange={e => setFormData({...formData, budget: Number(e.target.value)})} /></div>
                         </div>
                         <div><label className="block text-xs font-bold text-gray-700 uppercase mb-1.5">Fecha de Entrega</label><input type="date" required className="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white text-gray-900 outline-none focus:border-brand-900" value={formData.dueDate} onChange={e => setFormData({...formData, dueDate: e.target.value})} /></div>
+                        
+                        {/* Stage Editor */}
                         <div className="border-t border-gray-200 pt-4">
                             <div className="flex justify-between items-center mb-3">
                                 <label className="block text-xs font-bold text-gray-700 uppercase">Personalizar Etapas</label>
@@ -364,8 +410,6 @@ export const Projects = () => {
                 </div>
             </div>
         )}
-
-        {isShareModalOpen && <ClientViewModal />}
     </div>
   );
 };

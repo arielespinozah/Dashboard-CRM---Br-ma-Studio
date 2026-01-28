@@ -14,6 +14,7 @@ import { Inventory } from './pages/Inventory';
 import { Finance } from './pages/Finance';
 import { Calendar } from './pages/Calendar';
 import { Login } from './pages/Login';
+import { ClientProjectView } from './pages/ClientProjectView';
 import { User } from './types';
 import { auth } from './firebase';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -22,13 +23,11 @@ import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 interface ProtectedRouteProps {
   user: User | null;
   children?: React.ReactNode;
-  roles?: string[]; // Deprecated in favor of permissions but kept for backward compat logic if needed
+  roles?: string[]; 
 }
 
 const ProtectedRoute = ({ user, children, roles }: ProtectedRouteProps) => {
     if (!user) return <Navigate to="/login" replace />;
-    // We let the Sidebar handle visual permission hiding, but here we could strict check
-    // For now, if logged in, allow access to Layout (Layout handles menu visibility)
     return <>{children}</>;
 };
 
@@ -105,6 +104,9 @@ function App() {
       <Routes>
         <Route path="/login" element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/" />} />
         
+        {/* PUBLIC ROUTE FOR CLIENTS */}
+        <Route path="/p/:token" element={<ClientProjectView />} />
+
         <Route path="/" element={
             <ProtectedRoute user={user}>
                 <Layout user={user} onLogout={handleLogout}>
