@@ -147,16 +147,16 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
 
   return (
     <div className="flex h-screen bg-[#f4f6f7] overflow-hidden">
-      {/* Mobile Backdrop */}
+      {/* Mobile Backdrop - High Z-Index */}
       {mobileMenuOpen && (
         <div 
-          className="fixed inset-0 z-40 bg-brand-900/50 lg:hidden backdrop-blur-sm"
+          className="fixed inset-0 z-[60] bg-brand-900/50 lg:hidden backdrop-blur-sm transition-opacity"
           onClick={() => setMobileMenuOpen(false)}
         />
       )}
 
-      {/* Sidebar */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-64 transform bg-white border-r border-gray-200 transition-transform duration-300 ease-out lg:static lg:translate-x-0 shadow-2xl lg:shadow-none ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      {/* Sidebar - Higher Z-Index than header on mobile */}
+      <div className={`fixed inset-y-0 left-0 z-[70] w-64 transform bg-white border-r border-gray-200 transition-transform duration-300 ease-out lg:static lg:translate-x-0 shadow-2xl lg:shadow-none ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <Sidebar 
             onCloseMobile={() => setMobileMenuOpen(false)} 
             user={user} 
@@ -165,10 +165,10 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         
         {/* Modern Header */}
-        <header className="bg-white border-b border-gray-200 h-16 md:h-20 px-4 md:px-6 flex items-center justify-between shadow-sm z-30 relative">
+        <header className="bg-white border-b border-gray-200 h-16 md:h-20 px-4 md:px-6 flex items-center justify-between shadow-sm z-30 relative shrink-0">
             <div className="flex items-center gap-3">
                 <button 
                     onClick={() => setMobileMenuOpen(true)}
@@ -176,8 +176,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
                 >
                     <Menu size={24} />
                 </button>
-                <div>
-                    <h2 className="text-lg md:text-xl font-bold text-gray-900 leading-none truncate max-w-[150px] md:max-w-none">
+                <div className="overflow-hidden">
+                    <h2 className="text-lg md:text-xl font-bold text-gray-900 leading-none truncate">
                         {settings.companyName}
                     </h2>
                     <div className="flex items-center gap-2 mt-0.5">
@@ -279,7 +279,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
             </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8 bg-[#f4f6f7]">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8 bg-[#f4f6f7] scroll-smooth">
           {children}
         </main>
       </div>
