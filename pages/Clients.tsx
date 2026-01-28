@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Filter, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, Save, RefreshCw, ChevronRight, User, Check, Briefcase, ShoppingBag, Clock } from 'lucide-react';
+import { Users, Search, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, RefreshCw, ChevronRight, Check, Briefcase, ShoppingBag, Upload, Download, FileSpreadsheet } from 'lucide-react';
 import { Client, Sale } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
+import * as XLSX from 'xlsx';
 
 export const Clients = () => {
   const [clients, setClients] = useState<Client[]>(() => {
@@ -10,7 +11,6 @@ export const Clients = () => {
       return saved ? JSON.parse(saved) : [];
   });
   
-  // Need sales data for history (read-only here)
   const [sales, setSales] = useState<Sale[]>(() => {
       const saved = localStorage.getItem('crm_sales_history');
       return saved ? JSON.parse(saved) : [];
@@ -35,14 +35,12 @@ export const Clients = () => {
   useEffect(() => {
       const fetchClients = async () => {
           try {
-              // Clients
               const docSnap = await getDoc(doc(db, 'crm_data', 'clients'));
               if (docSnap.exists()) {
                   const list = docSnap.data().list;
                   setClients(list);
                   localStorage.setItem('crm_clients', JSON.stringify(list));
               }
-              // Sales (for history) - Silent update
               const salesSnap = await getDoc(doc(db, 'crm_data', 'sales_history'));
               if(salesSnap.exists()) {
                   setSales(salesSnap.data().list);
@@ -66,6 +64,69 @@ export const Clients = () => {
       syncToFirestore(clients);
   }, [clients, isLoaded]);
 
+  // --- Excel Logic ---
+  const handleExportExcel = () => {
+      const dataToExport = clients.map(c => ({
+          ID: c.id,
+          Nombre: c.name,
+          Empresa: c.company,
+          Email: c.email,
+          Telefono: c.phone,
+          Direccion: c.address,
+          Tipo: c.type === 'Client' ? 'Cliente' : 'Prospecto',
+          Notas: c.notes
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(dataToExport);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Clientes");
+      XLSX.writeFile(wb, "Clientes_BramaStudio.xlsx");
+  };
+
+  const handleDownloadTemplate = () => {
+      const template = [
+          { Nombre: "Ejemplo Juan", Empresa: "Empresa S.A.", Email: "juan@ejemplo.com", Telefono: "70012345", Direccion: "Av. Siempre Viva", Tipo: "Cliente", Notas: "Nota opcional" }
+      ];
+      const ws = XLSX.utils.json_to_sheet(template);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Plantilla");
+      XLSX.writeFile(wb, "Plantilla_Importar_Clientes.xlsx");
+  };
+
+  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+          const bstr = evt.target?.result;
+          const wb = XLSX.read(bstr, { type: 'binary' });
+          const wsname = wb.SheetNames[0];
+          const ws = wb.Sheets[wsname];
+          const data = XLSX.utils.sheet_to_json(ws);
+
+          const newClients: Client[] = data.map((row: any) => ({
+              id: Math.random().toString(36).substr(2, 9),
+              name: row.Nombre || 'Sin Nombre',
+              company: row.Empresa || '',
+              email: row.Email || '',
+              phone: row.Telefono || '',
+              address: row.Direccion || '',
+              type: row.Tipo === 'Cliente' ? 'Client' : 'Prospecto',
+              notes: row.Notas || '',
+              avatar: `https://ui-avatars.com/api/?name=${row.Nombre}&background=random`
+          }));
+
+          if (confirm(`¿Importar ${newClients.length} clientes encontrados en el archivo?`)) {
+              setClients(prev => [...prev, ...newClients]);
+              alert('Clientes importados exitosamente.');
+          }
+      };
+      reader.readAsBinaryString(file);
+      e.target.value = ''; // Reset input
+  };
+
+  // --- Standard Logic ---
   const handleEdit = (client: Client) => {
     setFormData(client);
     setEditingId(client.id);
@@ -127,16 +188,28 @@ export const Clients = () => {
 
   return (
     <div className="space-y-6 h-full flex flex-col relative">
-      {/* ... Header and List (Same as before) ... */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Clientes</h1>
           <p className="text-sm text-gray-500">Gestiona tu cartera de clientes y prospectos</p>
         </div>
-        <div className="flex gap-2">
-             {!isLoaded && <span className="text-xs text-brand-900 flex items-center gap-1"><RefreshCw className="animate-spin" size={12}/> Sincronizando...</span>}
+        <div className="flex flex-wrap gap-2">
+             {!isLoaded && <span className="text-xs text-brand-900 flex items-center gap-1"><RefreshCw className="animate-spin" size={12}/> Sync</span>}
+            
+            <button onClick={handleDownloadTemplate} className="px-3 py-2 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2" title="Descargar formato">
+                <FileSpreadsheet size={16}/> <span className="hidden sm:inline">Plantilla</span>
+            </button>
+            <div className="relative">
+                <input type="file" accept=".xlsx, .xls" onChange={handleImportExcel} className="absolute inset-0 w-full opacity-0 cursor-pointer" title="Importar Excel"/>
+                <button className="px-3 py-2 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2">
+                    <Upload size={16}/> <span className="hidden sm:inline">Importar</span>
+                </button>
+            </div>
+            <button onClick={handleExportExcel} className="px-3 py-2 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2">
+                <Download size={16}/> <span className="hidden sm:inline">Exportar</span>
+            </button>
             <button onClick={openNewClient} disabled={!isLoaded} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg shadow-brand-900/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
-            <Plus size={16} /> Nuevo Cliente
+                <Plus size={16} /> Nuevo
             </button>
         </div>
       </div>
@@ -189,7 +262,6 @@ export const Clients = () => {
                       <button onClick={() => setSelectedClient(null)} className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-200 rounded-full transition-colors"><X size={20}/></button>
                   </div>
                   
-                  {/* Drawer Tabs */}
                   <div className="flex gap-4 border-b border-gray-200">
                       <button onClick={() => setDrawerTab('Info')} className={`pb-2 text-sm font-bold transition-colors border-b-2 ${drawerTab === 'Info' ? 'border-brand-900 text-brand-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>Información</button>
                       <button onClick={() => setDrawerTab('History')} className={`pb-2 text-sm font-bold transition-colors border-b-2 ${drawerTab === 'History' ? 'border-brand-900 text-brand-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>Historial Compras</button>
@@ -254,7 +326,7 @@ export const Clients = () => {
           </div>
       )}
 
-      {/* Modal ... (Same as before) */}
+      {/* Modal Form */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
