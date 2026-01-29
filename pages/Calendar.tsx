@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Clock, Briefcase, CheckCircle2, X, AlertCircle, User, Flag } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Clock, Briefcase, CheckCircle2, X, AlertCircle, User, Flag, Trash2, Edit3 } from 'lucide-react';
 import { Project, CalendarEvent, Client } from '../types';
 import { db } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -8,7 +8,11 @@ export const Calendar = () => {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+    
+    // Modal States
     const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+    const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+    const [editingEventId, setEditingEventId] = useState<string | null>(null);
     
     // Auxiliary Data for Robustness
     const [projects, setProjects] = useState<Project[]>([]);
@@ -29,7 +33,7 @@ export const Calendar = () => {
         const fetchData = async () => {
             let allEvents: CalendarEvent[] = [];
 
-            // 1. Fetch Projects
+            // 1. Fetch Projects (Read Only Events)
             try {
                 const projDoc = await getDoc(doc(db, 'crm_data', 'projects'));
                 if (projDoc.exists()) {
@@ -38,7 +42,7 @@ export const Calendar = () => {
                     const projectEvents = projList.map(p => ({
                         id: `proj-${p.id}`,
                         title: `Entrega: ${p.title}`,
-                        date: p.dueDate.split('T')[0],
+                        date: p.dueDate.split('T')[0], // ISO date string part
                         type: 'Project' as const,
                         description: `Cliente: ${p.client}`,
                         time: '12:00',
@@ -74,10 +78,13 @@ export const Calendar = () => {
     const saveCustomEvent = async () => {
         if (!selectedDate || !newEvent.title) return;
         
+        // Helper to format date strictly as YYYY-MM-DD local time
+        const dateStr = selectedDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+
         const finalEvent: CalendarEvent = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: editingEventId || Math.random().toString(36).substr(2, 9),
             title: newEvent.title!,
-            date: selectedDate.toISOString().split('T')[0],
+            date: dateStr,
             time: newEvent.time,
             type: newEvent.type as any,
             description: newEvent.description,
@@ -88,17 +95,49 @@ export const Calendar = () => {
             linkedProjectTitle: projects.find(p => p.id === newEvent.linkedProjectId)?.title
         };
 
-        const customEvents = events.filter(e => e.type !== 'Project');
-        const updatedCustomEvents = [...customEvents, finalEvent];
+        // Filter out existing manually created events to prevent duplicates (if editing)
+        // Also ensure we don't accidentally delete project events (they are separate)
+        let customEvents = events.filter(e => e.type !== 'Project');
+        
+        if (modalMode === 'edit') {
+            customEvents = customEvents.map(e => e.id === editingEventId ? finalEvent : e);
+        } else {
+            customEvents = [...customEvents, finalEvent];
+        }
         
         try {
-            await setDoc(doc(db, 'crm_data', 'calendar'), { list: updatedCustomEvents });
-            setEvents(prev => [...prev, finalEvent]);
-            setIsEventModalOpen(false);
-            setNewEvent({ title: '', time: '', type: 'Meeting', description: '', priority: 'Medium', linkedClientId: '', linkedProjectId: '' });
+            await setDoc(doc(db, 'crm_data', 'calendar'), { list: customEvents });
+            
+            // Re-merge with Project events for local state
+            const projectEvents = events.filter(e => e.type === 'Project');
+            setEvents([...projectEvents, ...customEvents]);
+            
+            closeModal();
         } catch (e) {
             alert('Error al guardar evento');
         }
+    };
+
+    const handleDeleteEvent = async () => {
+        if (!editingEventId) return;
+        if (!confirm('¿Eliminar este evento?')) return;
+
+        const customEvents = events.filter(e => e.type !== 'Project' && e.id !== editingEventId);
+        
+        try {
+            await setDoc(doc(db, 'crm_data', 'calendar'), { list: customEvents });
+            const projectEvents = events.filter(e => e.type === 'Project');
+            setEvents([...projectEvents, ...customEvents]);
+            closeModal();
+        } catch (e) {
+            alert('Error al eliminar evento');
+        }
+    };
+
+    const closeModal = () => {
+        setIsEventModalOpen(false);
+        setEditingEventId(null);
+        setNewEvent({ title: '', time: '', type: 'Meeting', description: '', priority: 'Medium', linkedClientId: '', linkedProjectId: '' });
     };
 
     // Calendar Helpers
@@ -133,15 +172,36 @@ export const Calendar = () => {
     const handleDayClick = (day: number) => {
         const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
         setSelectedDate(date);
+        setModalMode('create');
+        setEditingEventId(null);
+        setNewEvent({ title: '', time: '', type: 'Meeting', description: '', priority: 'Medium', linkedClientId: '', linkedProjectId: '' });
+        setIsEventModalOpen(true);
+    };
+
+    const handleEventClick = (event: CalendarEvent, e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent triggering day click
+        
+        if (event.type === 'Project') {
+            // Project events are read-only in this view
+            alert(`Evento de Proyecto: ${event.title}\nPara editar, ve a la sección de Proyectos.`);
+            return;
+        }
+
+        // Parse date string correctly
+        const [year, month, day] = event.date.split('-').map(Number);
+        setSelectedDate(new Date(year, month - 1, day));
+        
+        setNewEvent(event);
+        setEditingEventId(event.id);
+        setModalMode('edit');
         setIsEventModalOpen(true);
     };
 
     const getUpcomingEvents = () => {
-        const now = new Date();
-        now.setHours(0,0,0,0);
+        const nowStr = new Date().toLocaleDateString('en-CA');
         return events
-            .filter(e => new Date(e.date) >= now)
-            .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+            .filter(e => e.date >= nowStr)
+            .sort((a,b) => a.date.localeCompare(b.date))
             .slice(0, 10);
     };
 
@@ -157,9 +217,12 @@ export const Calendar = () => {
 
         // Days
         for (let day = 1; day <= daysInMonth; day++) {
-            const dateStr = new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toISOString().split('T')[0];
+            // Force strict local date string generation
+            const dateObj = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+            const dateStr = dateObj.toLocaleDateString('en-CA'); // YYYY-MM-DD
+            
             const dayEvents = events.filter(e => e.date === dateStr);
-            const isToday = new Date().toDateString() === new Date(currentDate.getFullYear(), currentDate.getMonth(), day).toDateString();
+            const isToday = new Date().toLocaleDateString('en-CA') === dateStr;
 
             days.push(
                 <div key={day} onClick={() => handleDayClick(day)} className={`h-32 border-r border-b border-gray-100 p-2 relative hover:bg-gray-50 transition-colors cursor-pointer group ${isToday ? 'bg-blue-50/20' : 'bg-white'}`}>
@@ -169,7 +232,11 @@ export const Calendar = () => {
                     </div>
                     <div className="space-y-1 overflow-y-auto max-h-[80px] scrollbar-hide">
                         {dayEvents.map(ev => (
-                            <div key={ev.id} className={`text-[10px] px-1.5 py-1 rounded border truncate font-medium flex items-center gap-1.5 ${ev.priority === 'High' ? 'bg-red-50 text-red-800 border-red-100' : ev.priority === 'Low' ? 'bg-gray-50 text-gray-600 border-gray-200' : 'bg-blue-50 text-blue-800 border-blue-100'}`}>
+                            <div 
+                                key={ev.id} 
+                                onClick={(e) => handleEventClick(ev, e)}
+                                className={`text-[10px] px-1.5 py-1 rounded border truncate font-medium flex items-center gap-1.5 cursor-pointer hover:opacity-80 shadow-sm ${ev.type === 'Project' ? 'bg-purple-50 text-purple-800 border-purple-100' : ev.priority === 'High' ? 'bg-red-50 text-red-800 border-red-100' : ev.priority === 'Low' ? 'bg-gray-50 text-gray-600 border-gray-200' : 'bg-blue-50 text-blue-800 border-blue-100'}`}
+                            >
                                 {ev.type === 'Project' ? <Briefcase size={10}/> : <Clock size={10}/>}
                                 <span className="truncate">{ev.title}</span>
                             </div>
@@ -236,17 +303,23 @@ export const Calendar = () => {
                 <div className="flex-1 bg-white rounded-2xl border border-gray-200 shadow-sm p-6 overflow-y-auto">
                     <div className="space-y-6">
                         {getUpcomingEvents().length > 0 ? getUpcomingEvents().map((ev, idx) => {
-                            const date = new Date(ev.date);
-                            const today = new Date();
-                            today.setHours(0,0,0,0);
-                            const diffDays = Math.ceil((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                            // Date logic fix for display
+                            const [y, m, d] = ev.date.split('-').map(Number);
+                            const date = new Date(y, m-1, d);
+                            
+                            const todayStr = new Date().toLocaleDateString('en-CA');
+                            const diffTime = new Date(ev.date).getTime() - new Date(todayStr).getTime();
+                            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                             
                             return (
-                                <div key={idx} className="relative pl-4 border-l-2 border-gray-100">
-                                    <div className={`absolute -left-[5px] top-0 w-2.5 h-2.5 rounded-full ${ev.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
-                                    <p className="text-xs font-bold text-gray-400 uppercase mb-1">
-                                        {diffDays === 0 ? 'Hoy' : diffDays === 1 ? 'Mañana' : `En ${diffDays} días`} • {date.toLocaleDateString('es-ES', {weekday: 'short', day: 'numeric'})}
-                                    </p>
+                                <div key={idx} onClick={(e) => handleEventClick(ev, e)} className="relative pl-4 border-l-2 border-gray-100 cursor-pointer hover:bg-gray-50 p-2 rounded transition-colors group">
+                                    <div className={`absolute -left-[5px] top-2 w-2.5 h-2.5 rounded-full ${ev.priority === 'High' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                                    <div className="flex justify-between items-start">
+                                        <p className="text-xs font-bold text-gray-400 uppercase mb-1">
+                                            {diffDays === 0 ? 'Hoy' : diffDays === 1 ? 'Mañana' : `En ${diffDays} días`} • {date.toLocaleDateString('es-ES', {weekday: 'short', day: 'numeric'})}
+                                        </p>
+                                        {ev.type !== 'Project' && <Edit3 size={12} className="text-gray-300 group-hover:text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"/>}
+                                    </div>
                                     <h4 className="font-bold text-gray-900 text-sm">{ev.title}</h4>
                                     <div className="flex flex-wrap gap-2 mt-1">
                                         {ev.time && <p className="text-xs text-gray-500 flex items-center gap-1"><Clock size={12}/> {ev.time}</p>}
@@ -271,10 +344,10 @@ export const Calendar = () => {
                     <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl animate-in zoom-in duration-200">
                         <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
                             <div>
-                                <h3 className="font-bold text-lg text-gray-900">Nuevo Evento</h3>
-                                <p className="text-xs text-gray-500 flex items-center gap-1"><CalendarIcon size={12}/> {selectedDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                                <h3 className="font-bold text-lg text-gray-900">{modalMode === 'create' ? 'Nuevo Evento' : 'Editar Evento'}</h3>
+                                <p className="text-xs text-gray-500 flex items-center gap-1"><CalendarIcon size={12}/> {selectedDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
                             </div>
-                            <button onClick={() => setIsEventModalOpen(false)}><X size={20} className="text-gray-400"/></button>
+                            <button onClick={closeModal}><X size={20} className="text-gray-400"/></button>
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -335,7 +408,16 @@ export const Calendar = () => {
                             </div>
                         </div>
 
-                        <button onClick={saveCustomEvent} className="w-full bg-brand-900 text-white py-3 rounded-xl font-bold hover:bg-brand-800 shadow-lg">Guardar en Agenda</button>
+                        <div className="flex gap-3">
+                            {modalMode === 'edit' && (
+                                <button onClick={handleDeleteEvent} className="px-4 py-3 border border-red-200 text-red-600 rounded-xl font-bold hover:bg-red-50 flex items-center justify-center">
+                                    <Trash2 size={18}/>
+                                </button>
+                            )}
+                            <button onClick={saveCustomEvent} className="flex-1 bg-brand-900 text-white py-3 rounded-xl font-bold hover:bg-brand-800 shadow-lg">
+                                {modalMode === 'edit' ? 'Guardar Cambios' : 'Agendar Evento'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

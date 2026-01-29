@@ -36,8 +36,10 @@ export const Finance = () => {
                 const docSnap = await getDoc(doc(db, 'crm_data', 'finance_shifts'));
                 if (docSnap.exists()) {
                     const list = docSnap.data().list as CashShift[];
-                    setShifts(list);
-                    const open = list.find(s => s.status === 'Open');
+                    // Sort descending date
+                    const sorted = list.sort((a,b) => new Date(b.openDate).getTime() - new Date(a.openDate).getTime());
+                    setShifts(sorted);
+                    const open = sorted.find(s => s.status === 'Open');
                     if (open) setCurrentShift(open);
                 }
             } catch(e) {}
@@ -137,9 +139,18 @@ export const Finance = () => {
         e.preventDefault();
         if(!editingShift) return;
         
-        // Recalculate difference if finalAmount changed manually
-        const diff = (editingShift.finalAmount || 0) - (editingShift.systemCalculatedAmount || 0);
-        const updatedShift = { ...editingShift, difference: diff };
+        // SECURITY: Re-calculate system totals based on transactions + new initial amount
+        const totalIncome = editingShift.transactions.filter(t => t.type === 'Income').reduce((acc, t) => acc + t.amount, 0);
+        const totalExpense = editingShift.transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + t.amount, 0);
+        
+        const newSystemTotal = (Number(editingShift.initialAmount) || 0) + totalIncome - totalExpense;
+        const newDiff = (Number(editingShift.finalAmount) || 0) - newSystemTotal;
+        
+        const updatedShift = { 
+            ...editingShift, 
+            systemCalculatedAmount: newSystemTotal,
+            difference: newDiff 
+        };
 
         const updatedList = shifts.map(s => s.id === editingShift.id ? updatedShift : s);
         saveShifts(updatedList);
@@ -259,7 +270,7 @@ export const Finance = () => {
                                     <td className="px-6 py-4 text-right text-gray-600">Bs. {s.systemCalculatedAmount?.toFixed(2)}</td>
                                     <td className="px-6 py-4 text-right font-bold text-brand-900">Bs. {s.finalAmount?.toFixed(2)}</td>
                                     <td className="px-6 py-4 text-right">
-                                        <span className={`px-2 py-1 rounded font-bold ${!s.difference || s.difference === 0 ? 'bg-green-100 text-green-700' : s.difference > 0 ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
+                                        <span className={`px-2 py-1 rounded font-bold ${!s.difference || Math.abs(s.difference) < 0.5 ? 'bg-green-100 text-green-700' : s.difference > 0 ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
                                             {s.difference && s.difference > 0 ? '+' : ''}{s.difference?.toFixed(2)}
                                         </span>
                                     </td>
@@ -312,7 +323,7 @@ export const Finance = () => {
                                     <input autoFocus type="number" className="w-full text-center text-3xl font-bold border-b-2 border-gray-200 focus:border-brand-900 outline-none py-2 text-gray-900" value={finalCashCount || ''} onChange={e => setFinalCashCount(Number(e.target.value))} placeholder="0.00" />
                                 </div>
                                 {finalCashCount > 0 && (
-                                    <div className={`text-center text-sm font-bold ${finalCashCount - currentBalance === 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                    <div className={`text-center text-sm font-bold ${Math.abs(finalCashCount - currentBalance) < 0.5 ? 'text-green-600' : 'text-red-500'}`}>
                                         Diferencia: {(finalCashCount - currentBalance).toFixed(2)}
                                     </div>
                                 )}
@@ -366,17 +377,17 @@ export const Finance = () => {
                             <h3 className="font-bold text-lg text-gray-900">Corregir Cierre</h3>
                             <button onClick={() => setIsEditShiftOpen(false)}><X size={20} className="text-gray-400"/></button>
                         </div>
-                        <p className="text-xs text-red-500 mb-4 bg-red-50 p-2 rounded">Solo editar en caso de error humano.</p>
+                        <p className="text-xs text-red-500 mb-4 bg-red-50 p-2 rounded">Advertencia: El sistema recalculará los totales basándose en las transacciones internas y el nuevo monto inicial.</p>
                         <form onSubmit={handleSaveEditShift} className="space-y-4">
                             <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto Inicial</label>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto Inicial Correcto</label>
                                 <input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white" value={editingShift.initialAmount} onChange={e => setEditingShift({...editingShift, initialAmount: Number(e.target.value)})} />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto Final Real (Físico)</label>
                                 <input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white" value={editingShift.finalAmount} onChange={e => setEditingShift({...editingShift, finalAmount: Number(e.target.value)})} />
                             </div>
-                            <button type="submit" className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-md">Guardar Corrección</button>
+                            <button type="submit" className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-md">Guardar y Recalcular</button>
                         </form>
                     </div>
                 </div>

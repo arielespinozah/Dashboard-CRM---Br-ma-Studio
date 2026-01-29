@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Plus, Trash2, X, Package, Check, Printer, User, CreditCard, RefreshCw, Edit3, Download, Share2, Copy, Calendar, DollarSign, ChevronRight, Eye, ChevronDown, ShoppingBag, AlertCircle } from 'lucide-react';
+import { Search, Plus, Trash2, X, Package, Check, Printer, User, CreditCard, RefreshCw, Edit3, Download, Share2, Copy, Calendar, DollarSign, ChevronRight, Eye, ChevronDown, ShoppingBag, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Sale, QuoteItem, AppSettings, InventoryItem, Client, User as UserType, AuditLog } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -138,11 +138,10 @@ const Millones = (num: number) => {
 const convertNumberToWordsEs = (amount: number, currencyName: string) => {
     const data = {
         entero: Math.floor(amount),
-        decimal: Math.round((amount - Math.floor(amount)) * 100),
     };
     const letras = data.entero === 0 ? "CERO" : Millones(data.entero);
-    const decimalStr = data.decimal < 10 ? `0${data.decimal}` : `${data.decimal}`;
-    return `${letras} ${decimalStr}/100 ${currencyName.toUpperCase()}`;
+    // Hardcoded 00/100 as requested
+    return `${letras} 00/100 ${currencyName.toUpperCase()}`;
 };
 // ---------------------------------------------
 
@@ -363,6 +362,37 @@ export const Sales = () => {
       }
   };
   
+  // --- ROBUST STOCK HANDLING ---
+  const updateInventoryStock = (saleItems: QuoteItem[], reverse: boolean = false) => {
+      const inventoryUpdates = [...availableInventory];
+      let inventoryChanged = false;
+
+      saleItems.forEach(saleItem => {
+          const productIndex = inventoryUpdates.findIndex(i => i.name === saleItem.description);
+          if (productIndex > -1 && inventoryUpdates[productIndex].type === 'Product') {
+              // If reverse is true, we are adding stock back (Deleting a sale or starting an edit)
+              const modifier = reverse ? 1 : -1;
+              inventoryUpdates[productIndex].quantity += (saleItem.quantity * modifier);
+              
+              // Status Check
+              const qty = inventoryUpdates[productIndex].quantity;
+              const min = inventoryUpdates[productIndex].minStock || 5;
+              
+              if (qty <= 0) inventoryUpdates[productIndex].status = 'Critical';
+              else if (qty <= min) inventoryUpdates[productIndex].status = 'Low Stock';
+              else inventoryUpdates[productIndex].status = 'In Stock';
+              
+              inventoryChanged = true;
+          }
+      });
+
+      if (inventoryChanged) {
+          setAvailableInventory(inventoryUpdates);
+          localStorage.setItem('crm_inventory', JSON.stringify(inventoryUpdates));
+          setDoc(doc(db, 'crm_data', 'inventory'), { list: inventoryUpdates }).catch(e => console.error("Inv update fail", e));
+      }
+  };
+
   const handleFinalizeSale = async () => {
       if (!newSale.clientName) { alert('Seleccione un cliente.'); return; }
       if (!newSale.items || newSale.items.length === 0) { alert('Agregue productos.'); return; }
@@ -376,7 +406,7 @@ export const Sales = () => {
           id: saleId,
           clientId: newSale.clientId || 'generic',
           clientName: newSale.clientName,
-          date: newSale.date || new Date().toISOString(), // Keep original date if editing
+          date: newSale.date || new Date().toISOString(), 
           items: newSale.items,
           subtotal: newSale.subtotal || 0,
           discount: newSale.discount || 0,
@@ -389,41 +419,17 @@ export const Sales = () => {
           notes: ''
       };
       
-      // --- INVENTORY DEDUCTION LOGIC (AUDIT FIX) ---
-      // We only deduct if it's a NEW sale to avoid double deduction on edits (unless we track delta, which is complex. For now, simple deduction on create).
-      // Or if editing, we assume stock was already handled, or user must adjust manually in inventory.
-      // Ideally: Revert previous items, deduct new items.
-      // Simplified robust approach: Only deduct on NEW sales creation.
-      
-      if (!editingId) {
-          const inventoryUpdates = [...availableInventory];
-          let inventoryChanged = false;
-
-          finalSale.items.forEach(saleItem => {
-              const productIndex = inventoryUpdates.findIndex(i => i.name === saleItem.description);
-              if (productIndex > -1 && inventoryUpdates[productIndex].type === 'Product') {
-                  // Deduct Stock
-                  inventoryUpdates[productIndex].quantity -= saleItem.quantity;
-                  // Update Status
-                  if (inventoryUpdates[productIndex].quantity <= 0) {
-                      inventoryUpdates[productIndex].status = 'Critical';
-                  } else if (inventoryUpdates[productIndex].quantity <= (inventoryUpdates[productIndex].minStock || 5)) {
-                      inventoryUpdates[productIndex].status = 'Low Stock';
-                  } else {
-                      inventoryUpdates[productIndex].status = 'In Stock';
-                  }
-                  inventoryChanged = true;
-              }
-          });
-
-          if (inventoryChanged) {
-              setAvailableInventory(inventoryUpdates);
-              localStorage.setItem('crm_inventory', JSON.stringify(inventoryUpdates));
-              // Fire and forget cloud update for speed
-              setDoc(doc(db, 'crm_data', 'inventory'), { list: inventoryUpdates }).catch(e => console.error("Inventory update failed", e));
+      // LOGIC FOR INVENTORY UPDATE
+      if (editingId) {
+          // 1. Find Original Sale to restore stock first
+          const originalSale = sales.find(s => s.id === editingId);
+          if (originalSale) {
+              updateInventoryStock(originalSale.items, true); // Restore old stock
           }
       }
-      // ---------------------------------------------
+      
+      // 2. Deduct new stock
+      updateInventoryStock(finalSale.items, false);
 
       let updatedSales = [...sales];
       if (editingId) {
@@ -449,7 +455,7 @@ export const Sales = () => {
       setNewSale({
           clientName: sale.clientName,
           clientId: sale.clientId,
-          items: sale.items,
+          items: JSON.parse(JSON.stringify(sale.items)), // Deep copy to prevent ref issues
           paymentMethod: sale.paymentMethod,
           paymentStatus: sale.paymentStatus,
           subtotal: sale.subtotal,
@@ -457,7 +463,7 @@ export const Sales = () => {
           tax: sale.tax,
           total: sale.total,
           amountPaid: sale.amountPaid,
-          date: sale.date // Preserve date
+          date: sale.date 
       });
       setTaxEnabled(sale.tax > 0);
       setEditingId(sale.id);
@@ -473,20 +479,25 @@ export const Sales = () => {
           return;
       }
 
-      if (window.confirm("ADVERTENCIA DE SEGURIDAD: ¿Eliminar este recibo permanentemente?")) {
+      if (window.confirm("ADVERTENCIA DE SEGURIDAD: ¿Eliminar este recibo permanentemente? \n\nEl stock de los productos será devuelto al inventario.")) {
           const saleToDelete = sales.find(s => s.id === id);
-          const updatedSales = sales.filter(s => s.id !== id);
           
-          setSales(updatedSales);
-          localStorage.setItem('crm_sales_history', JSON.stringify(updatedSales));
-          
-          try {
-              await setDoc(doc(db, 'crm_data', 'sales_history'), { list: updatedSales });
-              if (currentUser && saleToDelete) {
-                  await logAuditAction('Delete', `Eliminó venta ${id}`, currentUser, `Monto eliminado: ${saleToDelete.total}. Cliente: ${saleToDelete.clientName}`);
+          if (saleToDelete) {
+              // RESTORE INVENTORY
+              updateInventoryStock(saleToDelete.items, true);
+              
+              const updatedSales = sales.filter(s => s.id !== id);
+              setSales(updatedSales);
+              localStorage.setItem('crm_sales_history', JSON.stringify(updatedSales));
+              
+              try {
+                  await setDoc(doc(db, 'crm_data', 'sales_history'), { list: updatedSales });
+                  if (currentUser) {
+                      await logAuditAction('Delete', `Eliminó venta ${id} y restauró stock`, currentUser, `Monto eliminado: ${saleToDelete.total}. Cliente: ${saleToDelete.clientName}`);
+                  }
+              } catch(err) {
+                  console.error("Cloud delete failed", err);
               }
-          } catch(err) {
-              console.error("Cloud delete failed", err);
           }
       }
   };

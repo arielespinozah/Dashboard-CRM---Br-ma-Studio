@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Download, DollarSign, ShoppingBag, Users, Calendar, Filter, Shield, AlertTriangle, RefreshCw, Search, Trash2, Edit3, PlusCircle, Archive } from 'lucide-react';
+import { Download, DollarSign, ShoppingBag, Users, Calendar, Filter, Shield, AlertTriangle, RefreshCw, Search, Trash2, Edit3, PlusCircle, Archive, Box } from 'lucide-react';
 import { Sale, InventoryItem, AuditLog, User } from '../types';
 import { db } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -27,7 +27,7 @@ const KPICard = ({ title, value, subtext, icon: Icon, colorClass, bgClass }: any
 type DateRange = 'today' | '7days' | '15days' | '30days' | '3months' | '6months' | '1year' | 'all';
 
 export const Reports = () => {
-    const [activeTab, setActiveTab] = useState<'Financial' | 'Audit'>('Financial');
+    const [activeTab, setActiveTab] = useState<'Financial' | 'Inventory' | 'Audit'>('Financial');
     const [allSales, setAllSales] = useState<Sale[]>([]);
     const [filteredSales, setFilteredSales] = useState<Sale[]>([]);
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -85,7 +85,9 @@ export const Reports = () => {
     // Filter Logic Financial
     useEffect(() => {
         const now = new Date();
+        // Fix: Use exact boundaries for comparison
         now.setHours(23, 59, 59, 999); 
+        
         let startDate = new Date();
         startDate.setHours(0,0,0,0);
 
@@ -115,7 +117,10 @@ export const Reports = () => {
 
         // Charts
         const dailyMap = new Map();
-        filtered.forEach(s => {
+        // Sort sales by date first for chart flow
+        const sortedSales = [...filtered].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        sortedSales.forEach(s => {
             const key = new Date(s.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
             dailyMap.set(key, (dailyMap.get(key) || 0) + s.total);
         });
@@ -133,7 +138,7 @@ export const Reports = () => {
 
     }, [allSales, dateRange, inventory]);
 
-    const handleExport = () => {
+    const handleExportSales = () => {
         const data = filteredSales.map(s => ({
             ID: s.id,
             Fecha: new Date(s.date).toLocaleDateString(),
@@ -142,11 +147,41 @@ export const Reports = () => {
             Estado: s.paymentStatus,
             Items: s.items.map(i => `${i.quantity}x ${i.description}`).join(', ')
         }));
-
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Reporte_Ventas");
         XLSX.writeFile(wb, `Reporte_Ventas_${dateRange}.xlsx`);
+    };
+
+    const handleExportInventory = () => {
+        const data = inventory.map(i => ({
+            Nombre: i.name,
+            SKU: i.sku,
+            Categoria: i.category,
+            Cantidad: i.quantity,
+            Costo: i.price,
+            ValorTotal: i.quantity * i.price,
+            Estado: i.status
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Inventario_Valorizado");
+        XLSX.writeFile(wb, `Reporte_Inventario_${new Date().toLocaleDateString().replace(/\//g,'-')}.xlsx`);
+    };
+
+    const handleExportAudit = () => {
+        const data = auditLogs.map(l => ({
+            Fecha: new Date(l.timestamp).toLocaleString(),
+            Usuario: l.user,
+            Accion: l.action,
+            Modulo: l.module,
+            Descripcion: l.description,
+            Detalles: l.metadata
+        }));
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Auditoria");
+        XLSX.writeFile(wb, `Reporte_Auditoria.xlsx`);
     };
 
     // --- Audit Functions ---
@@ -158,7 +193,11 @@ export const Reports = () => {
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             
+            // Filter locally first since we store as a single array
             const freshLogs = auditLogs.filter(log => new Date(log.timestamp) >= thirtyDaysAgo);
+            
+            // Simulate batching for large lists to prevent memory freeze (conceptually)
+            // In a real Firestore collection per log, we'd use batch.delete()
             
             await setDoc(doc(db, 'crm_data', 'audit_logs'), { list: freshLogs });
             setAuditLogs(freshLogs);
@@ -172,7 +211,7 @@ export const Reports = () => {
         }
     };
 
-    // Optimize filtering with useMemo to prevent render lag
+    // Optimize filtering
     const filteredAuditLogs = useMemo(() => {
         return auditLogs.filter(log => {
             const matchesUser = auditUserFilter === 'All' || log.user === auditUserFilter;
@@ -185,6 +224,10 @@ export const Reports = () => {
     const uniqueUsers = useMemo(() => Array.from(new Set(auditLogs.map(l => l.user))), [auditLogs]);
     const deletedCount = useMemo(() => filteredAuditLogs.filter(l => l.action === 'Delete').length, [filteredAuditLogs]);
 
+    // Inventory Metrics
+    const inventoryValuation = useMemo(() => inventory.reduce((acc, item) => acc + (item.quantity * item.price), 0), [inventory]);
+    const lowStockCount = useMemo(() => inventory.filter(i => i.status === 'Low Stock' || i.status === 'Critical').length, [inventory]);
+
     return (
         <div className="space-y-8 pb-12">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -195,6 +238,7 @@ export const Reports = () => {
                 
                 <div className="flex bg-gray-100 p-1 rounded-xl">
                     <button onClick={() => setActiveTab('Financial')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'Financial' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-700'}`}>Financiero</button>
+                    <button onClick={() => setActiveTab('Inventory')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'Inventory' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-700'}`}>Inventario</button>
                     {currentUser?.role === 'Admin' && (
                         <button onClick={() => setActiveTab('Audit')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all flex items-center gap-2 ${activeTab === 'Audit' ? 'bg-white shadow text-red-600' : 'text-gray-500 hover:text-gray-700'}`}>
                             <Shield size={14}/> Auditoría
@@ -224,7 +268,7 @@ export const Reports = () => {
                                     <option value="all" className="bg-white text-gray-900">Todo el historial</option>
                                 </select>
                             </div>
-                            <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg transition-all active:scale-95">
+                            <button onClick={handleExportSales} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg transition-all active:scale-95">
                                 <Download size={16} /> Exportar Excel
                             </button>
                         </div>
@@ -275,9 +319,67 @@ export const Reports = () => {
                 </div>
             )}
 
-            {/* AUDIT LOG VIEWER - ANTI FRAUD SYSTEM - PROTECTED */}
+            {activeTab === 'Inventory' && (
+                <div className="space-y-8 animate-in fade-in">
+                    <div className="flex justify-end">
+                        <button onClick={handleExportInventory} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg transition-all active:scale-95">
+                            <Download size={16} /> Exportar Inventario
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <KPICard 
+                            title="Valor Total Inventario" 
+                            value={`Bs. ${inventoryValuation.toLocaleString(undefined, {minimumFractionDigits: 2})}`} 
+                            subtext="Capital inmovilizado (Costo)" 
+                            icon={DollarSign} 
+                            bgClass="bg-blue-50" 
+                            colorClass="text-blue-600"
+                        />
+                        <KPICard 
+                            title="Stock Bajo / Crítico" 
+                            value={lowStockCount} 
+                            subtext="Ítems que requieren atención" 
+                            icon={AlertTriangle} 
+                            bgClass="bg-orange-50" 
+                            colorClass="text-orange-600"
+                        />
+                    </div>
+                    <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                        <h3 className="font-bold text-gray-900 text-lg mb-4">Top Productos por Valor</h3>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead className="text-xs uppercase text-gray-500 bg-gray-50">
+                                    <tr>
+                                        <th className="px-4 py-3">Item</th>
+                                        <th className="px-4 py-3 text-right">Cantidad</th>
+                                        <th className="px-4 py-3 text-right">Costo Unit.</th>
+                                        <th className="px-4 py-3 text-right">Valor Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-50 text-sm">
+                                    {[...inventory].sort((a,b) => (b.quantity*b.price) - (a.quantity*a.price)).slice(0, 10).map(item => (
+                                        <tr key={item.id}>
+                                            <td className="px-4 py-3 font-medium text-gray-900">{item.name}</td>
+                                            <td className="px-4 py-3 text-right">{item.quantity}</td>
+                                            <td className="px-4 py-3 text-right">Bs. {item.price}</td>
+                                            <td className="px-4 py-3 text-right font-bold text-brand-900">Bs. {(item.quantity * item.price).toFixed(2)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* AUDIT LOG VIEWER */}
             {activeTab === 'Audit' && currentUser?.role === 'Admin' && (
                 <div className="space-y-6 animate-in fade-in">
+                    <div className="flex justify-end mb-4">
+                         <button onClick={handleExportAudit} className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-200 transition-all">
+                            <Download size={16} /> Descargar Logs
+                        </button>
+                    </div>
                     {/* Security Stats */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="bg-red-50 p-6 rounded-2xl border border-red-100">
@@ -335,6 +437,7 @@ export const Reports = () => {
                                     <option value="All" className="bg-white text-gray-900">Todos los Módulos</option>
                                     <option value="Sales" className="bg-white text-gray-900">Ventas</option>
                                     <option value="Quotes" className="bg-white text-gray-900">Cotizaciones</option>
+                                    <option value="Inventory" className="bg-white text-gray-900">Inventario</option>
                                 </select>
                                 
                                 <button onClick={handleCleanLogs} disabled={isCleaningLogs} className="flex items-center gap-2 px-3 py-2 bg-white border border-red-200 text-red-600 rounded-lg hover:bg-red-50 text-sm font-medium transition-colors">

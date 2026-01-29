@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Calendar, Trash2, X, Edit3, CheckCircle2, Circle, Clock, Share2, ExternalLink, User, GripVertical, LayoutGrid, List as ListIcon, MoreHorizontal, ArrowRight, AlertCircle, Copy, Check } from 'lucide-react';
-import { Project, Status, Priority, ProjectStage, Client } from '../types';
+import { Plus, Calendar, Trash2, X, Edit3, CheckCircle2, Circle, Clock, Share2, ExternalLink, User, GripVertical, LayoutGrid, List as ListIcon, MoreHorizontal, ArrowRight, AlertCircle, Copy, Check, Lock } from 'lucide-react';
+import { Project, Status, Priority, ProjectStage, Client, User as UserType, CalendarEvent } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
@@ -13,6 +13,11 @@ const defaultStagesTemplate: ProjectStage[] = [
 ];
 
 export const Projects = () => {
+  const [currentUser, setCurrentUser] = useState<UserType | null>(() => {
+      const u = localStorage.getItem('crm_active_user');
+      return u ? JSON.parse(u) : null;
+  });
+
   const [projects, setProjects] = useState<Project[]>(() => {
       const saved = localStorage.getItem('crm_projects');
       return saved ? JSON.parse(saved) : [];
@@ -23,6 +28,8 @@ export const Projects = () => {
       return saved ? JSON.parse(saved) : [];
   });
 
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -32,6 +39,8 @@ export const Projects = () => {
   const [formData, setFormData] = useState<Partial<Project>>({
     title: '', client: '', priority: Priority.MEDIUM, status: Status.PLANNED, budget: 0, category: 'Design', dueDate: new Date().toISOString().split('T')[0], stages: []
   });
+
+  const canEdit = currentUser?.role === 'Admin' || currentUser?.role === 'Sales' || currentUser?.permissions?.includes('view_projects');
 
   const saveProjects = async (newProjects: Project[]) => {
       setProjects(newProjects);
@@ -58,6 +67,12 @@ export const Projects = () => {
                   const cloudClients = cDoc.data().list;
                   setClients(cloudClients);
                   localStorage.setItem('crm_clients', JSON.stringify(cloudClients));
+              }
+
+              // Load Calendar to check dependencies
+              const calDoc = await getDoc(doc(db, 'crm_data', 'calendar'));
+              if (calDoc.exists()) {
+                  setCalendarEvents(calDoc.data().list || []);
               }
           } catch (e) {}
       };
@@ -93,6 +108,14 @@ export const Projects = () => {
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
+      
+      // 1. Integrity Check: Calendar Events
+      const linkedEvents = calendarEvents.filter(ev => ev.linkedProjectId === id);
+      if (linkedEvents.length > 0) {
+          alert(`NO SE PUEDE ELIMINAR:\n\nEste proyecto tiene ${linkedEvents.length} eventos agendados en el Calendario.\nElimine primero los eventos asociados.`);
+          return;
+      }
+
       if (confirm('¿Eliminar este proyecto permanentemente?')) {
           const filtered = projects.filter(p => p.id !== id);
           saveProjects(filtered);
@@ -135,12 +158,24 @@ export const Projects = () => {
                   }
                   return s;
               });
-              const allDone = newStages.every(s => s.status === 'Completed');
-              const anyProgress = newStages.some(s => s.status === 'In Progress' || s.status === 'Completed');
+              
+              // Smart Status Logic
+              const totalStages = newStages.length;
+              const completedStages = newStages.filter(s => s.status === 'Completed').length;
+              const inProgressStages = newStages.filter(s => s.status === 'In Progress').length;
+
+              let newProjectStatus = Status.PLANNED;
+              
+              if (completedStages === totalStages && totalStages > 0) {
+                  newProjectStatus = Status.COMPLETED;
+              } else if (completedStages > 0 || inProgressStages > 0) {
+                  newProjectStatus = Status.IN_PROGRESS;
+              }
+
               updatedProject = { 
                   ...p, 
                   stages: newStages, 
-                  status: allDone ? Status.COMPLETED : anyProgress ? Status.IN_PROGRESS : Status.PLANNED 
+                  status: newProjectStatus 
               };
               return updatedProject;
           }
@@ -162,12 +197,9 @@ export const Projects = () => {
 
   // --- SHARE LINK LOGIC ---
   const handleCopyLink = (token: string) => {
-      // Robust link generation handling potential path issues in different environments
       let baseUrl = window.location.href.split('#')[0];
       if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
-      
       const link = `${baseUrl}/#/p/${token}`;
-      
       navigator.clipboard.writeText(link);
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
@@ -188,6 +220,14 @@ export const Projects = () => {
       }
   };
 
+  const isOverdue = (project: Project) => {
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const due = new Date(project.dueDate);
+      // Only overdue if strictly BEFORE today and NOT completed
+      return due < today && project.status !== Status.COMPLETED;
+  };
+
   return (
     <div className="space-y-6 h-full flex flex-col relative pb-safe-area">
         {/* Header */}
@@ -201,9 +241,11 @@ export const Projects = () => {
                     <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><LayoutGrid size={18}/></button>
                     <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><ListIcon size={18}/></button>
                 </div>
-                <button onClick={openNewProject} className="flex items-center gap-2 bg-brand-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-800 transition-all shadow-lg active:scale-95">
-                    <Plus size={18} /> Nuevo
-                </button>
+                {canEdit && (
+                    <button onClick={openNewProject} className="flex items-center gap-2 bg-brand-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-800 transition-all shadow-lg active:scale-95">
+                        <Plus size={18} /> Nuevo
+                    </button>
+                )}
             </div>
         </div>
 
@@ -212,21 +254,27 @@ export const Projects = () => {
             {projects.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-300 rounded-2xl bg-gray-50/50">
                     <p className="text-gray-500 font-medium mb-4">No hay proyectos activos.</p>
-                    <button onClick={openNewProject} className="text-brand-900 font-bold hover:underline">Crear el primero</button>
+                    {canEdit && <button onClick={openNewProject} className="text-brand-900 font-bold hover:underline">Crear el primero</button>}
                 </div>
             ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
                     {projects.map(project => {
                         const progress = calculateProgress(project.stages);
+                        const overdue = isOverdue(project);
                         return (
-                            <div key={project.id} onClick={() => setActiveProject(project)} className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:shadow-lg transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden ring-1 ring-gray-100 hover:ring-brand-500/30">
+                            <div key={project.id} onClick={() => setActiveProject(project)} className={`bg-white rounded-2xl p-5 border shadow-sm hover:shadow-lg transition-all cursor-pointer group flex flex-col h-full relative overflow-hidden ring-1 hover:ring-brand-500/30 ${overdue ? 'border-red-200 ring-red-100' : 'border-gray-200 ring-gray-100'}`}>
                                 <div className={`absolute top-0 left-0 w-full h-1.5 ${project.priority === Priority.HIGH ? 'bg-red-500' : project.priority === Priority.MEDIUM ? 'bg-orange-400' : 'bg-green-400'}`}></div>
                                 <div className="flex justify-between items-start mb-3 mt-2">
-                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest bg-gray-100 px-2 py-1 rounded-md border border-gray-200">{project.category}</span>
-                                    <div className="flex gap-1">
-                                        <button onClick={(e) => handleEdit(project, e)} className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-md transition-colors"><Edit3 size={14}/></button>
-                                        <button onClick={(e) => handleDelete(project.id, e)} className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-md transition-colors"><Trash2 size={14}/></button>
+                                    <div className="flex gap-2">
+                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest bg-gray-100 px-2 py-1 rounded-md border border-gray-200">{project.category}</span>
+                                        {overdue && <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-1 rounded-md flex items-center gap-1 animate-pulse"><AlertCircle size={10}/> ATRASADO</span>}
                                     </div>
+                                    {canEdit && (
+                                        <div className="flex gap-1">
+                                            <button onClick={(e) => handleEdit(project, e)} className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-md transition-colors"><Edit3 size={14}/></button>
+                                            <button onClick={(e) => handleDelete(project.id, e)} className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-md transition-colors"><Trash2 size={14}/></button>
+                                        </div>
+                                    )}
                                 </div>
                                 <h3 className="font-bold text-gray-900 text-lg mb-1 leading-snug line-clamp-2">{project.title}</h3>
                                 <p className="text-sm text-gray-500 mb-6 line-clamp-1 flex items-center gap-1"><User size={14}/> {project.client}</p>
@@ -236,7 +284,7 @@ export const Projects = () => {
                                         <div className={`h-full transition-all duration-700 ease-out rounded-full ${progress === 100 ? 'bg-green-500' : 'bg-brand-900'}`} style={{ width: `${progress}%` }}></div>
                                     </div>
                                     <div className="flex items-center justify-between text-xs pt-2 border-t border-gray-200">
-                                        <div className={`flex items-center gap-1.5 font-medium ${new Date(project.dueDate) < new Date() && project.status !== Status.COMPLETED ? 'text-red-600' : 'text-gray-600'}`}><Calendar size={14} />{new Date(project.dueDate).toLocaleDateString()}</div>
+                                        <div className={`flex items-center gap-1.5 font-medium ${overdue ? 'text-red-600 font-bold' : 'text-gray-600'}`}><Calendar size={14} />{new Date(project.dueDate).toLocaleDateString()}</div>
                                         {project.budget > 0 && <span className="text-gray-900 font-bold">Bs. {project.budget}</span>}
                                     </div>
                                 </div>
@@ -261,10 +309,14 @@ export const Projects = () => {
                             <tbody className="divide-y divide-gray-50">
                                 {projects.map(project => {
                                     const progress = calculateProgress(project.stages);
+                                    const overdue = isOverdue(project);
                                     return (
                                         <tr key={project.id} onClick={() => setActiveProject(project)} className="hover:bg-gray-50 cursor-pointer group transition-colors">
                                             <td className="px-6 py-4">
-                                                <p className="font-bold text-gray-900 text-sm">{project.title}</p>
+                                                <p className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                                                    {project.title}
+                                                    {overdue && <AlertCircle size={14} className="text-red-500"/>}
+                                                </p>
                                                 <span className="text-[10px] text-gray-500 uppercase bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">{project.category}</span>
                                             </td>
                                             <td className="px-6 py-4 text-sm text-gray-600">{project.client}</td>
@@ -279,11 +331,15 @@ export const Projects = () => {
                                                     <span className="text-xs font-bold text-gray-700">{progress}%</span>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 text-sm text-gray-600">{new Date(project.dueDate).toLocaleDateString()}</td>
+                                            <td className={`px-6 py-4 text-sm font-medium ${overdue ? 'text-red-600' : 'text-gray-600'}`}>{new Date(project.dueDate).toLocaleDateString()}</td>
                                             <td className="px-6 py-4 text-right">
                                                 <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
-                                                    <button onClick={(e) => handleEdit(project, e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit3 size={16}/></button>
-                                                    <button onClick={(e) => handleDelete(project.id, e)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
+                                                    {canEdit ? (
+                                                        <>
+                                                            <button onClick={(e) => handleEdit(project, e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit3 size={16}/></button>
+                                                            <button onClick={(e) => handleDelete(project.id, e)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
+                                                        </>
+                                                    ) : <span className="text-gray-300 p-2"><Lock size={16}/></span>}
                                                 </div>
                                             </td>
                                         </tr>
@@ -304,6 +360,7 @@ export const Projects = () => {
                         <div className="flex items-center gap-2 mb-2">
                             <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase border ${getPriorityColor(activeProject.priority)}`}>{activeProject.priority}</span>
                             <span className="text-[10px] px-2 py-0.5 rounded-md font-bold uppercase bg-white text-gray-700 border border-gray-300">{activeProject.category}</span>
+                            {isOverdue(activeProject) && <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-md font-bold uppercase animate-pulse">Vencido</span>}
                         </div>
                         <h2 className="text-2xl font-bold text-gray-900 leading-tight">{activeProject.title}</h2>
                         <div className="flex items-center gap-2 mt-1 text-sm text-gray-600 font-medium"><User size={14}/> {activeProject.client}</div>
@@ -330,21 +387,23 @@ export const Projects = () => {
                     </div>
 
                     {/* Date Control */}
-                    <div className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-200">
-                        <div className="flex items-center gap-2">
-                            <Calendar size={18} className="text-gray-500"/>
-                            <div>
-                                <p className="text-xs font-bold text-gray-900 uppercase">Fecha de Entrega</p>
-                                <p className="text-[10px] text-gray-500">Modificar si es necesario</p>
+                    {canEdit && (
+                        <div className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-200">
+                            <div className="flex items-center gap-2">
+                                <Calendar size={18} className="text-gray-500"/>
+                                <div>
+                                    <p className="text-xs font-bold text-gray-900 uppercase">Fecha de Entrega</p>
+                                    <p className="text-[10px] text-gray-500">Modificar si es necesario</p>
+                                </div>
                             </div>
+                            <input 
+                                type="date" 
+                                className="bg-white border border-gray-300 rounded-lg px-2 py-1 text-sm text-gray-900 outline-none focus:border-brand-900"
+                                value={activeProject.dueDate}
+                                onChange={(e) => handleUpdateDate(activeProject.id, e.target.value)}
+                            />
                         </div>
-                        <input 
-                            type="date" 
-                            className="bg-white border border-gray-300 rounded-lg px-2 py-1 text-sm text-gray-900 outline-none focus:border-brand-900"
-                            value={activeProject.dueDate}
-                            onChange={(e) => handleUpdateDate(activeProject.id, e.target.value)}
-                        />
-                    </div>
+                    )}
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30">
@@ -352,7 +411,7 @@ export const Projects = () => {
                     <div className="space-y-4 relative">
                         <div className="absolute left-[15px] top-2 bottom-2 w-0.5 bg-gray-200"></div>
                         {activeProject.stages.map((stage) => (
-                            <div key={stage.id} onClick={() => toggleStageStatus(activeProject.id, stage.id)} className={`relative pl-10 cursor-pointer group transition-all select-none`}>
+                            <div key={stage.id} onClick={() => canEdit && toggleStageStatus(activeProject.id, stage.id)} className={`relative pl-10 ${canEdit ? 'cursor-pointer group' : 'cursor-default'} transition-all select-none`}>
                                 <div className={`absolute left-0 top-0 w-8 h-8 rounded-full flex items-center justify-center border-4 border-white shadow-sm transition-colors z-10 ${stage.status === 'Completed' ? 'bg-green-500 text-white' : stage.status === 'In Progress' ? 'bg-brand-900 text-white' : 'bg-gray-200 text-gray-400'}`}>
                                     {stage.status === 'Completed' && <CheckCircle2 size={14}/>}
                                     {stage.status === 'In Progress' && <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>}
@@ -371,8 +430,8 @@ export const Projects = () => {
             </div>
         )}
 
-        {/* Modal Form (New/Edit) - Kept mostly same but ensures clean logic */}
-        {isModalOpen && (
+        {/* Modal Form */}
+        {isModalOpen && canEdit && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-8 animate-in fade-in zoom-in duration-200">
                     <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-2xl sticky top-0 z-10">

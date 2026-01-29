@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, RefreshCw, ChevronRight, Check, Briefcase, ShoppingBag, Upload, Download, FileSpreadsheet, CreditCard } from 'lucide-react';
-import { Client, Sale, AppSettings } from '../types';
+import { Users, Search, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, RefreshCw, ChevronRight, Check, Briefcase, ShoppingBag, Upload, Download, FileSpreadsheet, CreditCard, AlertTriangle, TrendingUp } from 'lucide-react';
+import { Client, Sale, AppSettings, Project } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
@@ -15,9 +16,13 @@ export const Clients = () => {
       const saved = localStorage.getItem('crm_sales_history');
       return saved ? JSON.parse(saved) : [];
   });
+
+  const [projects, setProjects] = useState<Project[]>(() => {
+      const saved = localStorage.getItem('crm_projects');
+      return saved ? JSON.parse(saved) : [];
+  });
   
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  
   const [isLoaded, setIsLoaded] = useState(false); 
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -33,7 +38,6 @@ export const Clients = () => {
     name: '', company: '', nit: '', email: '', phone: '', address: '', type: 'Prospect', notes: ''
   });
 
-  // Fetch from cloud on mount
   useEffect(() => {
       const fetchClients = async () => {
           try {
@@ -48,12 +52,14 @@ export const Clients = () => {
                   setSales(salesSnap.data().list);
                   localStorage.setItem('crm_sales_history', JSON.stringify(salesSnap.data().list));
               }
+              const projSnap = await getDoc(doc(db, 'crm_data', 'projects'));
+              if(projSnap.exists()) {
+                  setProjects(projSnap.data().list);
+                  localStorage.setItem('crm_projects', JSON.stringify(projSnap.data().list));
+              }
               const settingsSnap = await getDoc(doc(db, 'crm_data', 'settings'));
               if(settingsSnap.exists()) {
                   setSettings(settingsSnap.data() as AppSettings);
-              } else {
-                  const local = localStorage.getItem('crm_settings');
-                  if(local) setSettings(JSON.parse(local));
               }
           } catch (e) { console.error("Error fetching data", e); }
           finally { setIsLoaded(true); }
@@ -61,19 +67,19 @@ export const Clients = () => {
       fetchClients();
   }, []);
 
-  const syncToFirestore = async (updatedClients: Client[]) => {
-      try {
-          await setDoc(doc(db, 'crm_data', 'clients'), { list: updatedClients });
-      } catch (e) {}
-  };
-
   useEffect(() => {
       if (!isLoaded) return;
       localStorage.setItem('crm_clients', JSON.stringify(clients));
-      syncToFirestore(clients);
+      setDoc(doc(db, 'crm_data', 'clients'), { list: clients }).catch(()=>{});
   }, [clients, isLoaded]);
 
-  // --- Excel Logic ---
+  // Calculate LTV
+  const getClientLTV = (client: Client) => {
+      return sales
+        .filter(s => s.clientId === client.id || s.clientName === client.name)
+        .reduce((sum, s) => sum + s.total, 0);
+  };
+
   const handleExportExcel = () => {
       const dataToExport = clients.map(c => ({
           ID: c.id,
@@ -84,6 +90,7 @@ export const Clients = () => {
           Telefono: c.phone,
           Direccion: c.address,
           Tipo: c.type === 'Client' ? 'Cliente' : 'Prospecto',
+          Compras_Totales: getClientLTV(c),
           Notas: c.notes
       }));
 
@@ -117,29 +124,52 @@ export const Clients = () => {
           const data = XLSX.utils.sheet_to_json(ws);
           const taxLabel = settings?.taxIdLabel || 'NIT';
 
-          const newClients: Client[] = data.map((row: any) => ({
-              id: Math.random().toString(36).substr(2, 9),
-              name: row.Nombre || 'Sin Nombre',
-              company: row.Empresa || '',
-              nit: row[taxLabel] || row['NIT'] || '',
-              email: row.Email || '',
-              phone: row.Telefono || '',
-              address: row.Direccion || '',
-              type: row.Tipo === 'Cliente' ? 'Client' : 'Prospecto',
-              notes: row.Notas || '',
-              avatar: `https://ui-avatars.com/api/?name=${row.Nombre}&background=random`
-          }));
+          let importedCount = 0;
+          let duplicatesSkipped = 0;
 
-          if (confirm(`¿Importar ${newClients.length} clientes encontrados en el archivo?`)) {
-              setClients(prev => [...prev, ...newClients]);
-              alert('Clientes importados exitosamente.');
+          const newClients: Client[] = [];
+          
+          data.forEach((row: any) => {
+              const name = row.Nombre || 'Sin Nombre';
+              const email = row.Email || '';
+              
+              const exists = clients.some(c => 
+                  c.name.toLowerCase() === name.toLowerCase() || 
+                  (email && c.email.toLowerCase() === email.toLowerCase())
+              );
+
+              if (!exists) {
+                  newClients.push({
+                      id: Math.random().toString(36).substr(2, 9),
+                      name: name,
+                      company: row.Empresa || '',
+                      nit: row[taxLabel] || row['NIT'] || '',
+                      email: email,
+                      phone: row.Telefono || '',
+                      address: row.Direccion || '',
+                      type: row.Tipo === 'Cliente' ? 'Client' : 'Prospect',
+                      notes: row.Notas || '',
+                      avatar: `https://ui-avatars.com/api/?name=${name}&background=random`
+                  });
+                  importedCount++;
+              } else {
+                  duplicatesSkipped++;
+              }
+          });
+
+          if (newClients.length > 0) {
+              if (confirm(`Se encontraron ${importedCount} clientes nuevos (${duplicatesSkipped} duplicados omitidos). ¿Importar ahora?`)) {
+                  setClients(prev => [...prev, ...newClients]);
+                  alert('Clientes importados exitosamente.');
+              }
+          } else {
+              alert('No se encontraron clientes nuevos para importar.');
           }
       };
       reader.readAsBinaryString(file);
-      e.target.value = ''; // Reset input
+      e.target.value = ''; 
   };
 
-  // --- Standard Logic ---
   const handleEdit = (client: Client) => {
     setFormData(client);
     setEditingId(client.id);
@@ -148,13 +178,32 @@ export const Clients = () => {
   };
 
   const handleDelete = (id: string) => {
-    if (confirm('¿Eliminar cliente?')) {
+    const client = clients.find(c => c.id === id);
+    if (!client) return;
+
+    const hasSales = sales.some(s => s.clientId === id || s.clientName === client.name);
+    const hasProjects = projects.some(p => p.client === client.name); 
+
+    if (hasSales || hasProjects) {
+        alert('ADVERTENCIA: No se puede eliminar este cliente porque tiene ventas o proyectos asociados. Considere cambiar su estado a "Prospecto" o agregar una nota de "Inactivo" para mantener el historial.');
+        return;
+    }
+
+    if (confirm('¿Eliminar cliente permanentemente? Esta acción no se puede deshacer.')) {
       setClients(prev => prev.filter(c => c.id !== id));
       if (selectedClient?.id === id) setSelectedClient(null);
     }
   };
 
   const handleConvertToClient = (client: Client) => {
+      // Duplicate check for official clients (NIT/Email strictness)
+      const duplicate = clients.find(c => c.type === 'Client' && c.id !== client.id && ( (c.nit && c.nit === client.nit) || (c.email && c.email === client.email) ));
+      
+      if (duplicate) {
+          alert(`Error: Ya existe un Cliente con este NIT o Email (${duplicate.name}). Fusione los registros manualmente.`);
+          return;
+      }
+
       if (confirm(`¿Convertir a ${client.name} en Cliente oficial?`)) {
           const updatedClient = { ...client, type: 'Client' as const };
           setClients(prev => prev.map(c => c.id === client.id ? updatedClient : c));
@@ -200,6 +249,10 @@ export const Clients = () => {
       return sales.filter(s => s.clientName === client.name || s.clientId === client.id).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   };
 
+  const getClientProjects = (client: Client) => {
+      return projects.filter(p => p.client === client.name);
+  };
+
   return (
     <div className="space-y-6 h-full flex flex-col relative">
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
@@ -242,38 +295,42 @@ export const Clients = () => {
 
       <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 text-xs font-bold text-gray-700 uppercase tracking-wider bg-gray-100 rounded-t-xl border-b border-gray-200">
           <div className="col-span-4">Nombre / Empresa</div>
-          <div className="col-span-3">Correo Electrónico</div>
-          <div className="col-span-3">Teléfono</div>
+          <div className="col-span-3">Contacto</div>
+          <div className="col-span-3 text-right">Compras (LTV)</div>
           <div className="col-span-2 text-right">Estado</div>
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-2 pb-12 bg-white md:bg-transparent rounded-b-xl border border-gray-100 md:border-none">
-        {filteredClients.map(client => (
-          <div key={client.id} onClick={() => { setSelectedClient(client); setDrawerTab('Info'); }} className={`bg-white rounded-xl p-4 border transition-all cursor-pointer group hover:shadow-md ${selectedClient?.id === client.id ? 'border-brand-500 ring-1 ring-brand-200 bg-brand-50/10' : 'border-gray-100 hover:border-brand-200'}`}>
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-                <div className="col-span-1 md:col-span-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-gray-100 flex-shrink-0 flex items-center justify-center text-gray-600 font-bold border border-gray-200">{client.name.charAt(0)}</div>
-                    <div className="min-w-0">
-                        <h3 className="font-bold text-gray-900 text-sm truncate">{client.name}</h3>
-                        <p className="text-xs text-gray-500 truncate">{client.company || 'Particular'}</p>
+        {filteredClients.map(client => {
+            const ltv = getClientLTV(client);
+            return (
+              <div key={client.id} onClick={() => { setSelectedClient(client); setDrawerTab('Info'); }} className={`bg-white rounded-xl p-4 border transition-all cursor-pointer group hover:shadow-md ${selectedClient?.id === client.id ? 'border-brand-500 ring-1 ring-brand-200 bg-brand-50/10' : 'border-gray-100 hover:border-brand-200'}`}>
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                    <div className="col-span-1 md:col-span-4 flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full bg-gray-100 flex-shrink-0 flex items-center justify-center text-gray-600 font-bold border border-gray-200">{client.name.charAt(0)}</div>
+                        <div className="min-w-0">
+                            <h3 className="font-bold text-gray-900 text-sm truncate">{client.name}</h3>
+                            <p className="text-xs text-gray-500 truncate">{client.company || 'Particular'}</p>
+                        </div>
+                    </div>
+                    
+                    <div className="col-span-1 md:col-span-3">
+                         <div className="flex items-center text-xs text-gray-600 truncate"><Mail size={12} className="mr-2 text-gray-400"/>{client.email || '--'}</div>
+                         <div className="flex items-center text-xs text-gray-600 truncate mt-1"><Phone size={12} className="mr-2 text-gray-400"/>{client.phone || '--'}</div>
+                    </div>
+
+                    <div className="col-span-3 text-right hidden md:block">
+                        <span className={`text-sm font-bold ${ltv > 0 ? 'text-brand-900' : 'text-gray-400'}`}>Bs. {ltv.toLocaleString()}</span>
+                    </div>
+                    
+                    <div className="col-span-1 md:col-span-2 flex items-center justify-between md:justify-end gap-3 mt-2 md:mt-0 pt-2 md:pt-0 border-t md:border-0 border-gray-50">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${client.type === 'Client' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>{client.type === 'Client' ? 'Cliente' : 'Prospecto'}</span>
+                        <ChevronRight size={18} className="text-gray-300 group-hover:text-brand-900 transition-colors hidden md:block"/>
                     </div>
                 </div>
-                
-                <div className="col-span-1 md:col-span-3 flex md:hidden flex-col gap-1 mt-1">
-                     <div className="flex items-center text-xs text-gray-600"><Mail size={12} className="mr-2 text-gray-400"/>{client.email || 'No email'}</div>
-                     <div className="flex items-center text-xs text-gray-600"><Phone size={12} className="mr-2 text-gray-400"/>{client.phone || 'No telf.'}</div>
-                </div>
-
-                <div className="hidden md:flex col-span-3 items-center text-xs text-gray-600 font-medium truncate"><Mail size={14} className="text-gray-300 mr-2 flex-shrink-0"/><span className="truncate">{client.email || '---'}</span></div>
-                <div className="hidden md:flex col-span-3 items-center text-xs text-gray-600 font-medium truncate"><Phone size={14} className="text-gray-300 mr-2 flex-shrink-0"/><span className="truncate">{client.phone || '---'}</span></div>
-                
-                <div className="col-span-1 md:col-span-2 flex items-center justify-between md:justify-end gap-3 mt-2 md:mt-0 pt-2 md:pt-0 border-t md:border-0 border-gray-50">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${client.type === 'Client' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>{client.type === 'Client' ? 'Cliente' : 'Prospecto'}</span>
-                    <ChevronRight size={18} className="text-gray-300 group-hover:text-brand-900 transition-colors hidden md:block"/>
-                </div>
-            </div>
-          </div>
-        ))}
+              </div>
+            );
+        })}
         {filteredClients.length === 0 && <div className="text-center py-20 text-gray-400"><p>No se encontraron registros.</p></div>}
       </div>
 
@@ -291,7 +348,7 @@ export const Clients = () => {
                   
                   <div className="flex gap-4 border-b border-gray-200">
                       <button onClick={() => setDrawerTab('Info')} className={`pb-2 text-sm font-bold transition-colors border-b-2 ${drawerTab === 'Info' ? 'border-brand-900 text-brand-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>Información</button>
-                      <button onClick={() => setDrawerTab('History')} className={`pb-2 text-sm font-bold transition-colors border-b-2 ${drawerTab === 'History' ? 'border-brand-900 text-brand-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>Historial Compras</button>
+                      <button onClick={() => setDrawerTab('History')} className={`pb-2 text-sm font-bold transition-colors border-b-2 ${drawerTab === 'History' ? 'border-brand-900 text-brand-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>Historial</button>
                   </div>
               </div>
               
@@ -317,6 +374,24 @@ export const Clients = () => {
                               <div className="flex items-center gap-3 text-sm text-gray-700"><div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400"><MapPin size={16}/></div>{selectedClient.address || <span className="text-gray-400 italic">No registrada</span>}</div>
                           </div>
 
+                          <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Resumen de Actividad</h3>
+                              <div className="grid grid-cols-2 gap-4 text-center">
+                                  <div>
+                                      <p className="text-2xl font-bold text-gray-900">{getClientHistory(selectedClient).length}</p>
+                                      <p className="text-[10px] text-gray-500 uppercase">Compras</p>
+                                  </div>
+                                  <div>
+                                      <p className="text-2xl font-bold text-gray-900">{getClientProjects(selectedClient).length}</p>
+                                      <p className="text-[10px] text-gray-500 uppercase">Proyectos</p>
+                                  </div>
+                              </div>
+                              <div className="mt-4 pt-4 border-t border-gray-200 text-center">
+                                  <p className="text-xs text-gray-500 uppercase mb-1">Valor Total (LTV)</p>
+                                  <p className="text-xl font-black text-brand-900">Bs. {getClientLTV(selectedClient).toLocaleString()}</p>
+                              </div>
+                          </div>
+
                           {selectedClient.notes && (
                               <div>
                                   <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 pb-2 mb-3">Notas Internas</h3>
@@ -325,27 +400,49 @@ export const Clients = () => {
                           )}
                       </div>
                   ) : (
-                      <div className="space-y-4">
-                          {getClientHistory(selectedClient).length > 0 ? (
-                              getClientHistory(selectedClient).map(sale => (
-                                  <div key={sale.id} className="bg-gray-50 p-4 rounded-xl border border-gray-100 flex justify-between items-center">
-                                      <div>
-                                          <p className="text-sm font-bold text-gray-900">{new Date(sale.date).toLocaleDateString()}</p>
-                                          <p className="text-xs text-gray-500">Venta: {sale.id}</p>
-                                          <div className="text-xs text-gray-600 mt-1">{sale.items.length} artículos: {sale.items.map(i => i.description).join(', ').substring(0, 30)}...</div>
+                      <div className="space-y-6">
+                          {/* Active Projects */}
+                          <div>
+                              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Proyectos Activos</h3>
+                              {getClientProjects(selectedClient).length > 0 ? (
+                                  getClientProjects(selectedClient).map(p => (
+                                      <div key={p.id} className="mb-3 bg-white border border-gray-200 p-3 rounded-lg flex justify-between items-center shadow-sm">
+                                          <div>
+                                              <p className="text-sm font-bold text-gray-900">{p.title}</p>
+                                              <span className="text-[10px] px-2 py-0.5 bg-gray-100 rounded-md text-gray-600 uppercase">{p.status}</span>
+                                          </div>
+                                          <div className="text-right">
+                                              <p className="text-xs text-gray-500">{new Date(p.dueDate).toLocaleDateString()}</p>
+                                          </div>
                                       </div>
-                                      <div className="text-right">
-                                          <span className="block font-bold text-brand-900">Bs. {sale.total}</span>
-                                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${sale.paymentStatus === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{sale.paymentStatus === 'Paid' ? 'Pagado' : 'Pendiente'}</span>
+                                  ))
+                              ) : <p className="text-sm text-gray-400 italic">No tiene proyectos.</p>}
+                          </div>
+
+                          {/* Sales History */}
+                          <div>
+                              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Historial de Compras</h3>
+                              {getClientHistory(selectedClient).length > 0 ? (
+                                  getClientHistory(selectedClient).map(sale => (
+                                      <div key={sale.id} className="bg-gray-50 p-4 rounded-xl border border-gray-100 flex justify-between items-center mb-2">
+                                          <div>
+                                              <p className="text-sm font-bold text-gray-900">{new Date(sale.date).toLocaleDateString()}</p>
+                                              <p className="text-xs text-gray-500">Venta: {sale.id}</p>
+                                              <div className="text-xs text-gray-600 mt-1">{sale.items.length} artículos.</div>
+                                          </div>
+                                          <div className="text-right">
+                                              <span className="block font-bold text-brand-900">Bs. {sale.total}</span>
+                                              <span className={`text-[10px] px-2 py-0.5 rounded-full ${sale.paymentStatus === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{sale.paymentStatus === 'Paid' ? 'Pagado' : 'Pendiente'}</span>
+                                          </div>
                                       </div>
+                                  ))
+                              ) : (
+                                  <div className="text-center py-4 text-gray-400">
+                                      <ShoppingBag size={24} className="mx-auto mb-2 opacity-20"/>
+                                      <p className="text-sm">Sin compras registradas.</p>
                                   </div>
-                              ))
-                          ) : (
-                              <div className="text-center py-10 text-gray-400">
-                                  <ShoppingBag size={32} className="mx-auto mb-2 opacity-20"/>
-                                  <p className="text-sm">Sin compras registradas.</p>
-                              </div>
-                          )}
+                              )}
+                          </div>
                       </div>
                   )}
               </div>

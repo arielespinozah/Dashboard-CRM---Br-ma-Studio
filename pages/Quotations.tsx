@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileText, Search, Plus, Trash2, X, Edit3, Package, Download, RefreshCw, Share2, Copy, ExternalLink, Link as LinkIcon, DollarSign, Printer, Calendar as CalendarIcon, ChevronDown, Check, Eye } from 'lucide-react';
-import { Quote, QuoteItem, AppSettings, Client, InventoryItem, User, AuditLog } from '../types';
+import { FileText, Search, Plus, Trash2, X, Edit3, Package, Download, RefreshCw, Share2, Copy, ExternalLink, Link as LinkIcon, DollarSign, Printer, Calendar as CalendarIcon, ChevronDown, Check, Eye, ShoppingCart, Lock } from 'lucide-react';
+import { Quote, QuoteItem, AppSettings, Client, InventoryItem, User, AuditLog, Sale } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { db } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { useNavigate } from 'react-router-dom';
 
 const formatCurrency = (amount: number, settings: AppSettings) => {
     const val = amount.toLocaleString(undefined, { minimumFractionDigits: settings.decimals, maximumFractionDigits: settings.decimals });
@@ -29,6 +30,119 @@ const getCategoryColor = (category: string) => {
     const index = Math.abs(hash) % colors.length;
     return colors[index];
 };
+
+// --- NUMBER TO WORDS CONVERTER (SPANISH) ---
+// (Functions Miles, Millones, etc. remain the same, kept for consistency)
+const Unidades = (num: number) => {
+    switch (num) {
+        case 1: return "UN";
+        case 2: return "DOS";
+        case 3: return "TRES";
+        case 4: return "CUATRO";
+        case 5: return "CINCO";
+        case 6: return "SEIS";
+        case 7: return "SIETE";
+        case 8: return "OCHO";
+        case 9: return "NUEVE";
+        default: return "";
+    }
+};
+
+const Decenas = (num: number) => {
+    const decena = Math.floor(num / 10);
+    const unidad = num - (decena * 10);
+    switch (decena) {
+        case 1:
+            switch (unidad) {
+                case 0: return "DIEZ";
+                case 1: return "ONCE";
+                case 2: return "DOCE";
+                case 3: return "TRECE";
+                case 4: return "CATORCE";
+                case 5: return "QUINCE";
+                default: return "DIECI" + Unidades(unidad);
+            }
+        case 2:
+            switch (unidad) {
+                case 0: return "VEINTE";
+                default: return "VEINTI" + Unidades(unidad);
+            }
+        case 3: return DecenasY("TREINTA", unidad);
+        case 4: return DecenasY("CUARENTA", unidad);
+        case 5: return DecenasY("CINCUENTA", unidad);
+        case 6: return DecenasY("SESENTA", unidad);
+        case 7: return DecenasY("SETENTA", unidad);
+        case 8: return DecenasY("OCHENTA", unidad);
+        case 9: return DecenasY("NOVENTA", unidad);
+        case 0: return Unidades(unidad);
+        default: return "";
+    }
+};
+
+const DecenasY = (strSin: string, numUnidades: number) => {
+    if (numUnidades > 0) return strSin + " Y " + Unidades(numUnidades);
+    return strSin;
+};
+
+const Centenas = (num: number) => {
+    const centenas = Math.floor(num / 100);
+    const decenas = num - (centenas * 100);
+    switch (centenas) {
+        case 1:
+            if (decenas > 0) return "CIENTO " + Decenas(decenas);
+            return "CIEN";
+        case 2: return "DOSCIENTOS " + Decenas(decenas);
+        case 3: return "TRESCIENTOS " + Decenas(decenas);
+        case 4: return "CUATROCIENTOS " + Decenas(decenas);
+        case 5: return "QUINIENTOS " + Decenas(decenas);
+        case 6: return "SEISCIENTOS " + Decenas(decenas);
+        case 7: return "SETECIENTOS " + Decenas(decenas);
+        case 8: return "OCHOCIENTOS " + Decenas(decenas);
+        case 9: return "NOVECIENTOS " + Decenas(decenas);
+        default: return Decenas(decenas);
+    }
+};
+
+const Seccion = (num: number, divisor: number, strSingular: string, strPlural: string) => {
+    const cientos = Math.floor(num / divisor);
+    const resto = num - (cientos * divisor);
+    let letras = "";
+    if (cientos > 0) {
+        if (cientos > 1) letras = Centenas(cientos) + " " + strPlural;
+        else letras = strSingular;
+    }
+    if (resto > 0) letras += "";
+    return letras;
+};
+
+const Miles = (num: number) => {
+    const divisor = 1000;
+    const cientos = Math.floor(num / divisor);
+    const resto = num - (cientos * divisor);
+    const strMiles = Seccion(num, divisor, "UN MIL", "MIL");
+    const strCentenas = Centenas(resto);
+    if (strMiles === "") return strCentenas;
+    return strMiles + " " + strCentenas;
+};
+
+const Millones = (num: number) => {
+    const divisor = 1000000;
+    const cientos = Math.floor(num / divisor);
+    const resto = num - (cientos * divisor);
+    const strMillones = Seccion(num, divisor, "UN MILLON", "MILLONES");
+    const strMiles = Miles(resto);
+    if (strMillones === "") return strMiles;
+    return strMillones + " " + strMiles;
+};
+
+const convertNumberToWordsEs = (amount: number, currencyName: string) => {
+    const data = {
+        entero: Math.floor(amount),
+    };
+    const letras = data.entero === 0 ? "CERO" : Millones(data.entero);
+    return `${letras} 00/100 ${currencyName.toUpperCase()}`;
+};
+// ---------------------------------------------
 
 const initialQuotes: Quote[] = [];
 
@@ -76,6 +190,7 @@ const logAuditAction = async (action: 'Delete' | 'Update' | 'Create', descriptio
 };
 
 export const Quotations = () => {
+  const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
       const saved = localStorage.getItem('crm_active_user');
       return saved ? JSON.parse(saved) : null;
@@ -109,6 +224,8 @@ export const Quotations = () => {
   const [newClientName, setNewClientName] = useState('');
   
   const [catalogSearch, setCatalogSearch] = useState('');
+  const [clientSearch, setClientSearch] = useState(''); 
+  
   const [catalogTab, setCatalogTab] = useState<'All' | 'Service' | 'Product'>('All');
   const [catalogCategory, setCatalogCategory] = useState<string>('All');
 
@@ -217,6 +334,12 @@ export const Quotations = () => {
   const openEdit = (quote: Quote, e?: React.MouseEvent) => {
       e?.preventDefault();
       e?.stopPropagation();
+      
+      if (quote.status === 'Approved') {
+          alert("Esta cotización ya fue aprobada/convertida y no se puede editar. Crea una nueva versión.");
+          return;
+      }
+
       setNewQuote(quote);
       setTaxEnabled(!!quote.taxEnabled); 
       setEditingId(quote.id);
@@ -323,13 +446,16 @@ export const Quotations = () => {
   const handleSave = async (e: React.FormEvent) => {
       e.preventDefault();
       
+      // Filter out empty rows
+      const cleanItems = (newQuote.items || []).filter(i => i.description.trim() !== '' || i.total > 0);
+
       const finalQuote: Quote = {
           id: editingId || `COT-${new Date().getFullYear()}-${String(quotes.length + 1).padStart(4, '0')}`,
           clientName: newQuote.clientName || 'Cliente General',
           clientEmail: newQuote.clientEmail,
           date: newQuote.date || new Date().toISOString(),
           validUntil: newQuote.validUntil || new Date().toISOString(),
-          items: newQuote.items || [],
+          items: cleanItems,
           subtotal: newQuote.subtotal || 0,
           discount: newQuote.discount || 0,
           tax: newQuote.tax || 0,
@@ -389,6 +515,91 @@ export const Quotations = () => {
       setIsClientModalOpen(false);
       setNewClientName('');
   };
+
+  // --- CONVERT TO SALE LOGIC (FIXED) ---
+  const handleConvertToSale = async (quote: Quote) => {
+      if (quote.items.length === 0) { alert('La cotización no tiene ítems.'); return; }
+      if (quote.status === 'Approved') { alert('Esta cotización ya fue convertida.'); return; }
+
+      // PRE-CHECK STOCK
+      const missingStockItems: string[] = [];
+      quote.items.forEach(item => {
+          const invItem = availableInventory.find(i => i.name === item.description && i.type === 'Product');
+          if (invItem && invItem.quantity < item.quantity) {
+              missingStockItems.push(`${item.description} (Stock: ${invItem.quantity}, Req: ${item.quantity})`);
+          }
+      });
+
+      if (missingStockItems.length > 0) {
+          if (!window.confirm(`ADVERTENCIA: Stock insuficiente para:\n\n${missingStockItems.join('\n')}\n\n¿Continuar y dejar stock negativo?`)) {
+              return;
+          }
+      } else {
+          if (!window.confirm(`¿Convertir cotización ${quote.id} en Venta confirmada?\n\nSe descontará inventario y se bloqueará la cotización.`)) return;
+      }
+
+      // 1. Create Sale Object
+      const newSaleId = `VTA-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
+      const newSale: Sale = {
+          id: newSaleId,
+          clientId: availableClients.find(c => c.name === quote.clientName)?.id || 'gen',
+          clientName: quote.clientName,
+          date: new Date().toISOString(),
+          items: quote.items,
+          subtotal: quote.subtotal,
+          discount: quote.discount,
+          tax: quote.tax,
+          total: quote.total,
+          amountPaid: quote.total, // Assume full payment for conversion simplicity
+          balance: 0,
+          paymentStatus: 'Paid',
+          paymentMethod: 'Cash',
+          notes: `Generado desde Cotización ${quote.id}`
+      };
+
+      try {
+          // 2. Load and Update Sales
+          const salesSnap = await getDoc(doc(db, 'crm_data', 'sales_history'));
+          let currentSales: Sale[] = salesSnap.exists() ? salesSnap.data().list : [];
+          const updatedSales = [newSale, ...currentSales];
+          await setDoc(doc(db, 'crm_data', 'sales_history'), { list: updatedSales });
+          localStorage.setItem('crm_sales_history', JSON.stringify(updatedSales));
+
+          // 3. Update Inventory
+          const inventoryUpdates = [...availableInventory];
+          let inventoryChanged = false;
+          newSale.items.forEach(saleItem => {
+              const productIndex = inventoryUpdates.findIndex(i => i.name === saleItem.description);
+              if (productIndex > -1 && inventoryUpdates[productIndex].type === 'Product') {
+                  inventoryUpdates[productIndex].quantity -= saleItem.quantity;
+                  // Status update
+                  if (inventoryUpdates[productIndex].quantity <= 0) inventoryUpdates[productIndex].status = 'Critical';
+                  else if (inventoryUpdates[productIndex].quantity <= (inventoryUpdates[productIndex].minStock || 5)) inventoryUpdates[productIndex].status = 'Low Stock';
+                  else inventoryUpdates[productIndex].status = 'In Stock';
+                  
+                  inventoryChanged = true;
+              }
+          });
+
+          if (inventoryChanged) {
+              setAvailableInventory(inventoryUpdates);
+              localStorage.setItem('crm_inventory', JSON.stringify(inventoryUpdates));
+              await setDoc(doc(db, 'crm_data', 'inventory'), { list: inventoryUpdates });
+          }
+
+          // 4. Update Quote Status
+          const updatedQuotes = quotes.map(q => q.id === quote.id ? { ...q, status: 'Approved' as const } : q);
+          setQuotes(updatedQuotes);
+          await saveQuotes(updatedQuotes);
+
+          alert('Conversión exitosa.');
+          navigate('/sales'); // Redirect to Sales
+
+      } catch (e) {
+          console.error("Conversion failed", e);
+          alert('Error al convertir. Verifica tu conexión.');
+      }
+  };
   // --- NEW HANDLERS END ---
 
   const getClientDetails = (name: string) => {
@@ -403,12 +614,12 @@ export const Quotations = () => {
       return matchesTab && matchesCategory && matchesSearch;
   });
 
-  const filteredClients = availableClients.filter(c => c.name.toLowerCase().includes(catalogSearch.toLowerCase()));
+  // Use clientSearch state for clients to prevent collision
+  const filteredClients = availableClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase()));
   const categories = ['All', ...Array.from(new Set(availableInventory.map(i => i.category)))];
 
-  // Render Helper for PDF
+  // Render Helper for PDF (Same as before)
   const renderQuoteContent = (quoteData: Quote) => (
-      // ... (Same as existing PDF template) ...
       <div className="w-[210mm] min-h-[297mm] bg-white text-slate-800 relative font-sans leading-normal shadow-2xl" style={{padding:0}}>
         <div className="p-10 flex justify-between items-center" style={{ backgroundColor: settings.pdfHeaderColor || settings.primaryColor || '#162836' }}>
             <div className="flex items-center">
@@ -471,6 +682,13 @@ export const Quotations = () => {
             </div>
             <div className="flex justify-between items-start">
                 <div className="w-[55%] pr-8">
+                    <div className="mb-6">
+                        <h4 className="font-bold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">El monto de:</h4>
+                        <div className="text-sm font-bold text-gray-700 italic border-l-4 border-gray-300 pl-3 py-1">
+                            {convertNumberToWordsEs(quoteData.total, settings.currencyName)}
+                        </div>
+                    </div>
+                    
                     <div className="mb-6">
                         <h4 className="font-bold text-gray-900 mb-3 text-[11px] uppercase tracking-wide">Métodos de Pago</h4>
                         <div className="flex gap-5 items-start">
@@ -555,16 +773,28 @@ export const Quotations = () => {
                 <tbody className="divide-y divide-gray-50">
                     {quotes.map((quote) => (
                     <tr key={quote.id} className="hover:bg-gray-50 transition-colors cursor-pointer">
-                        <td className="px-6 py-4 text-sm font-medium text-brand-900">{quote.id}</td>
+                        <td className="px-6 py-4 text-sm font-medium text-brand-900 flex items-center gap-2">
+                            {quote.id}
+                            {quote.status === 'Approved' && <Check size={14} className="text-green-500" title="Aprobada / Convertida"/>}
+                        </td>
                         <td className="px-6 py-4 text-sm text-gray-900">{quote.clientName}</td>
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(quote.total, settings)}</td>
                         <td className="px-6 py-4 text-right flex justify-end gap-1">
                             <div className="flex gap-1 relative z-50">
+                                {quote.status !== 'Approved' ? (
+                                    <button onClick={(e) => { e.stopPropagation(); handleConvertToSale(quote); }} className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Convertir a Venta"><ShoppingCart size={18}/></button>
+                                ) : (
+                                    <span className="p-2 text-gray-300 cursor-not-allowed"><Lock size={18}/></span>
+                                )}
                                 <button onClick={(e) => handlePreview(quote, e)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Vista Previa"><Eye size={18} /></button>
                                 <button onClick={(e) => handleShareWhatsApp(quote, e)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Compartir"><Share2 size={18}/></button>
                                 <button onClick={(e) => handleDirectAction(quote, 'download', e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Descargar"><Download size={18} /></button>
                                 <button onClick={(e) => handleDirectAction(quote, 'print', e)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Imprimir"><Printer size={18} /></button>
-                                <button onClick={(e) => openEdit(quote, e)} className="p-2 text-orange-500 hover:bg-orange-50 rounded-lg transition-colors" title="Editar"><Edit3 size={18} /></button>
+                                {quote.status !== 'Approved' ? (
+                                    <button onClick={(e) => openEdit(quote, e)} className="p-2 text-orange-500 hover:bg-orange-50 rounded-lg transition-colors" title="Editar"><Edit3 size={18} /></button>
+                                ) : (
+                                    <span className="p-2 text-gray-300 cursor-not-allowed"><Edit3 size={18}/></span>
+                                )}
                                 {currentUser?.role === 'Admin' && (
                                     <button 
                                         onClick={(e) => handleDelete(quote.id, e)} 
@@ -589,7 +819,10 @@ export const Quotations = () => {
                   <div key={quote.id} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex flex-col gap-3 active:scale-[0.98] transition-transform relative">
                       <div className="flex justify-between items-start">
                           <div>
-                              <h4 className="font-bold text-brand-900 text-sm">{quote.id}</h4>
+                              <h4 className="font-bold text-brand-900 text-sm flex items-center gap-2">
+                                  {quote.id}
+                                  {quote.status === 'Approved' && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Venta</span>}
+                              </h4>
                               <p className="text-sm text-gray-700 font-medium">{quote.clientName}</p>
                               <p className="text-xs text-gray-500 mt-0.5">{quote.date ? new Date(quote.date).toLocaleDateString() : 'N/A'}</p>
                           </div>
@@ -597,6 +830,7 @@ export const Quotations = () => {
                       <div className="flex justify-between items-center pt-2 border-t border-gray-50">
                           <span className="font-bold text-lg text-gray-900">{formatCurrency(quote.total, settings)}</span>
                           <div className="flex gap-2 relative z-50">
+                              {quote.status !== 'Approved' && <button onClick={(e) => { e.stopPropagation(); handleConvertToSale(quote); }} className="p-2 bg-purple-50 text-purple-600 rounded-lg"><ShoppingCart size={16}/></button>}
                               <button onClick={(e) => handlePreview(quote, e)} className="p-2 bg-gray-50 text-gray-600 rounded-lg"><Eye size={16}/></button>
                               <button onClick={(e) => handleShareWhatsApp(quote, e)} className="p-2 bg-green-50 text-green-600 rounded-lg"><Share2 size={16}/></button>
                               <button onClick={(e) => handleDirectAction(quote, 'print', e)} className="p-2 bg-gray-50 text-gray-600 rounded-lg"><Printer size={16}/></button>
@@ -736,7 +970,7 @@ export const Quotations = () => {
         </div>
       )}
 
-      {/* Share & Client & Catalog Modals ... (Unchanged logic) */}
+      {/* Share & Client & Catalog Modals */}
       {isShareModalOpen && shareQuote && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 relative animate-in zoom-in duration-200 mx-4">
@@ -750,8 +984,7 @@ export const Quotations = () => {
           </div>
       )}
       
-      {/* Client and Catalog modals remain exactly as they were */}
-      {isClientModalOpen && (/* ... Same Client Modal ... */
+      {isClientModalOpen && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
               <div className="bg-white rounded-2xl w-full max-w-md h-[450px] flex flex-col shadow-2xl relative overflow-hidden mx-4">
                   <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
@@ -763,7 +996,7 @@ export const Quotations = () => {
                           <div className="p-4 border-b border-gray-100 flex gap-2">
                               <div className="relative flex-1">
                                   <Search className="absolute left-3 top-2.5 text-gray-400" size={18}/>
-                                  <input autoFocus type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand-500 text-gray-900 bg-white" onChange={(e) => setCatalogSearch(e.target.value)} />
+                                  <input autoFocus type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand-500 text-gray-900 bg-white" onChange={(e) => setClientSearch(e.target.value)} />
                               </div>
                               <button onClick={() => setClientSearchMode(false)} className="px-3 bg-brand-900 text-white rounded-xl text-sm font-bold hover:bg-brand-800 flex items-center gap-1"><Plus size={16}/> Nuevo</button>
                           </div>
@@ -795,7 +1028,7 @@ export const Quotations = () => {
           </div>
       )}
 
-      {isCatalogModalOpen && (/* ... Same Catalog Modal ... */
+      {isCatalogModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
               <div className="bg-white rounded-2xl w-full max-w-5xl h-[80vh] flex flex-col shadow-2xl animate-in zoom-in duration-200 mx-4 overflow-hidden border border-gray-200">
                   <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-20">

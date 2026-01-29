@@ -1,17 +1,53 @@
 import React, { useState, useEffect } from 'react';
-import { Boxes, Search, Plus, Filter, AlertTriangle, ArrowDown, ArrowUp, RefreshCw, Trash2, Edit3, X, History, Archive, AlertOctagon } from 'lucide-react';
-import { InventoryItem, User } from '../types';
+import { Boxes, Search, Plus, Filter, AlertTriangle, ArrowDown, ArrowUp, RefreshCw, Trash2, Edit3, X, History, Archive, AlertOctagon, TrendingUp } from 'lucide-react';
+import { InventoryItem, User, AuditLog } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
+// Helper for Audit
+const logAuditAction = async (action: 'Delete' | 'Update' | 'Create', description: string, user: User, metadata?: string) => {
+    const log: AuditLog = {
+        id: Date.now().toString(),
+        action,
+        module: 'Inventory',
+        description,
+        user: user.name,
+        role: user.role,
+        timestamp: new Date().toISOString(),
+        metadata
+    };
+    try {
+        const savedLogs = localStorage.getItem('crm_audit_logs');
+        const logs = savedLogs ? JSON.parse(savedLogs) : [];
+        const updatedLogs = [log, ...logs];
+        localStorage.setItem('crm_audit_logs', JSON.stringify(updatedLogs));
+        await setDoc(doc(db, 'crm_data', 'audit_logs'), { list: updatedLogs });
+    } catch(e) { console.error("Audit Log Error", e); }
+};
+
+interface Movement {
+    id: string;
+    itemId: string;
+    itemName: string;
+    type: 'in'|'out'|'waste';
+    amount: number;
+    date: string;
+    user: string;
+    reason?: string;
+    costImpact?: number; // New field for financial loss
+}
+
 export const Inventory = () => {
-    // Initialize with empty or local storage, but don't default to initialInventory if we want cloud truth
     const [items, setItems] = useState<InventoryItem[]>(() => {
         const s = localStorage.getItem('crm_inventory');
         return s ? JSON.parse(s) : [];
     });
     
-    // Check Permissions
+    const [movements, setMovements] = useState<Movement[]>(() => {
+        const s = localStorage.getItem('crm_inventory_movements');
+        return s ? JSON.parse(s) : [];
+    });
+    
     const [currentUser, setCurrentUser] = useState<User | null>(() => {
         const u = localStorage.getItem('crm_active_user');
         return u ? JSON.parse(u) : null;
@@ -19,11 +55,9 @@ export const Inventory = () => {
 
     const canManage = currentUser?.role === 'Admin' || currentUser?.permissions?.includes('all') || currentUser?.permissions?.includes('manage_inventory');
 
-    // Mock Movement History
-    const [movements, setMovements] = useState<{id: string, itemId: string, type: 'in'|'out'|'waste', amount: number, date: string, reason?: string}[]>([]);
-
     const [searchTerm, setSearchTerm] = useState('');
     const [filterType, setFilterType] = useState<'All' | 'Critical' | 'Low Stock'>('All');
+    const [isSyncing, setIsSyncing] = useState(false);
     
     // Modals
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -33,25 +67,33 @@ export const Inventory = () => {
     
     // Stock Logic
     const [isStockModalOpen, setIsStockModalOpen] = useState(false);
-    const [stockAdjustment, setStockAdjustment] = useState({ id: '', amount: 0, type: 'add' }); // type: add, remove, waste
+    const [stockAdjustment, setStockAdjustment] = useState({ id: '', amount: 0, type: 'add' }); 
     
     const [newItem, setNewItem] = useState<Partial<InventoryItem>>({
         name: '', sku: '', category: '', quantity: 0, minStock: 5, price: 0, status: 'In Stock'
     });
 
-    // 1. Fetch from Cloud on Mount (CRITICAL FOR PERSISTENCE)
+    // Sync Data
     useEffect(() => {
         const fetchInventory = async () => {
+            setIsSyncing(true);
             try {
+                // Fetch Items
                 const docSnap = await getDoc(doc(db, 'crm_data', 'inventory'));
                 if (docSnap.exists()) {
                     const list = docSnap.data().list;
                     setItems(list);
                     localStorage.setItem('crm_inventory', JSON.stringify(list));
                 }
-            } catch (e) {
-                console.error("Error loading inventory", e);
-            }
+                // Fetch Movements History
+                const movSnap = await getDoc(doc(db, 'crm_data', 'inventory_movements'));
+                if (movSnap.exists()) {
+                    const list = movSnap.data().list;
+                    setMovements(list);
+                    localStorage.setItem('crm_inventory_movements', JSON.stringify(list));
+                }
+            } catch (e) { console.error("Error loading inventory", e); }
+            finally { setIsSyncing(false); }
         };
         fetchInventory();
     }, []);
@@ -59,8 +101,13 @@ export const Inventory = () => {
     const updateItems = (newItems: InventoryItem[]) => {
         setItems(newItems);
         localStorage.setItem('crm_inventory', JSON.stringify(newItems));
-        // Force save to cloud
-        setDoc(doc(db, 'crm_data', 'inventory'), { list: newItems }).catch(e => console.error("Save error", e));
+        setDoc(doc(db, 'crm_data', 'inventory'), { list: newItems }).catch(()=>{});
+    };
+
+    const updateMovements = (newMovements: Movement[]) => {
+        setMovements(newMovements);
+        localStorage.setItem('crm_inventory_movements', JSON.stringify(newMovements));
+        setDoc(doc(db, 'crm_data', 'inventory_movements'), { list: newMovements }).catch(()=>{});
     };
 
     const handleCreateItem = (e: React.FormEvent) => {
@@ -72,7 +119,9 @@ export const Inventory = () => {
         };
 
         if (editingId) {
+            const oldItem = items.find(i => i.id === editingId);
             updateItems(items.map(i => i.id === editingId ? { ...i, ...updatedItem } as InventoryItem : i));
+            if(currentUser) logAuditAction('Update', `Editó ítem: ${updatedItem.name}`, currentUser, `Anterior: ${oldItem?.quantity}, Nuevo: ${updatedItem.quantity}`);
         } else {
             const item: InventoryItem = {
                 id: Math.random().toString(36).substr(2, 9),
@@ -81,34 +130,51 @@ export const Inventory = () => {
                 category: newItem.category || 'General',
                 quantity: Number(newItem.quantity),
                 minStock: Number(newItem.minStock),
-                price: Number(newItem.price), // Cost price
+                price: Number(newItem.price),
                 status: updatedItem.status as any,
                 lastUpdated: updatedItem.lastUpdated,
                 type: 'Product' 
             };
             updateItems([...items, item]);
+            if(currentUser) logAuditAction('Create', `Creó ítem: ${item.name}`, currentUser, `Stock Inicial: ${item.quantity}`);
         }
         setIsModalOpen(false);
     };
 
-    const handleStockUpdate = (e: React.FormEvent) => {
+    // RACE CONDITION PROTECTION
+    const handleStockUpdate = async (e: React.FormEvent) => {
         e.preventDefault();
-        updateItems(items.map(item => {
-            if (item.id === stockAdjustment.id) {
-                const newQty = stockAdjustment.type === 'add' 
-                    ? item.quantity + stockAdjustment.amount 
-                    : Math.max(0, item.quantity - stockAdjustment.amount);
-                
-                // Add to history log
-                setMovements(prev => [{
-                    id: Math.random().toString(),
-                    itemId: item.id,
-                    type: stockAdjustment.type as any,
-                    amount: stockAdjustment.amount,
-                    date: new Date().toLocaleString(),
-                    reason: stockAdjustment.type === 'waste' ? 'Desperdicio/Daño' : stockAdjustment.type === 'add' ? 'Reposición' : 'Uso/Venta'
-                }, ...prev]);
+        
+        // 1. Fetch fresh data to avoid overwrites
+        let freshItems = [...items];
+        try {
+            const freshDoc = await getDoc(doc(db, 'crm_data', 'inventory'));
+            if(freshDoc.exists()) {
+                freshItems = freshDoc.data().list;
+            }
+        } catch(e) {
+            console.warn("Could not fetch fresh stock, using local state");
+        }
 
+        const targetItem = freshItems.find(i => i.id === stockAdjustment.id);
+        if (!targetItem) return;
+
+        // Prevent Negative Stock
+        if (stockAdjustment.type !== 'add' && targetItem.quantity < stockAdjustment.amount) {
+            alert(`Error: Stock insuficiente. Tienes ${targetItem.quantity}, intentas restar ${stockAdjustment.amount}.`);
+            return;
+        }
+
+        const newQty = stockAdjustment.type === 'add' 
+            ? targetItem.quantity + stockAdjustment.amount 
+            : Math.max(0, targetItem.quantity - stockAdjustment.amount);
+        
+        // Calculate Cost Impact for Waste
+        const costImpact = stockAdjustment.type === 'waste' ? (stockAdjustment.amount * targetItem.price) : 0;
+
+        // 2. Update Items with FRESH Data
+        const updatedItemsList = freshItems.map(item => {
+            if (item.id === stockAdjustment.id) {
                 return { 
                     ...item, 
                     quantity: newQty, 
@@ -117,7 +183,31 @@ export const Inventory = () => {
                 };
             }
             return item;
-        }));
+        });
+        
+        updateItems(updatedItemsList);
+
+        // 3. Add Movement Record
+        const newMovement: Movement = {
+            id: Date.now().toString(),
+            itemId: targetItem.id,
+            itemName: targetItem.name,
+            type: stockAdjustment.type as any,
+            amount: stockAdjustment.amount,
+            date: new Date().toISOString(),
+            user: currentUser?.name || 'Desconocido',
+            reason: stockAdjustment.type === 'waste' ? 'Desperdicio/Daño' : stockAdjustment.type === 'add' ? 'Reposición Manual' : 'Uso Manual',
+            costImpact
+        };
+        updateMovements([newMovement, ...movements]);
+
+        // 4. Log Audit
+        if (currentUser) {
+            const actionDesc = stockAdjustment.type === 'add' ? 'Aumentó stock' : stockAdjustment.type === 'waste' ? 'Reportó merma' : 'Redujo stock';
+            const meta = `Cant: ${stockAdjustment.amount}, Motivo: ${newMovement.reason}` + (costImpact > 0 ? `, Pérdida Financiera: ${costImpact}` : '');
+            logAuditAction('Update', `${actionDesc} de ${targetItem.name}`, currentUser, meta);
+        }
+
         setIsStockModalOpen(false);
     };
 
@@ -133,6 +223,9 @@ export const Inventory = () => {
 
     const itemMovements = movements.filter(m => m.itemId === selectedItemHistory?.id);
 
+    // Calculate Valuation
+    const totalInventoryValue = items.reduce((acc, item) => acc + (item.quantity * item.price), 0);
+
     return (
         <div className="space-y-6 h-full flex flex-col pb-safe-area">
             <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -145,6 +238,21 @@ export const Inventory = () => {
                         <Plus size={18} /> Nuevo Insumo
                     </button>
                 )}
+            </div>
+
+            {/* Valuation Card */}
+            <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-50 text-green-700 rounded-lg"><TrendingUp size={20}/></div>
+                    <div>
+                        <p className="text-xs text-gray-500 font-bold uppercase">Valorización del Inventario</p>
+                        <p className="text-lg font-bold text-brand-900">Bs. {totalInventoryValue.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                    </div>
+                </div>
+                <div className="text-right hidden sm:block">
+                    <p className="text-xs text-gray-400">Total Ítems</p>
+                    <p className="text-sm font-bold text-gray-700">{items.length}</p>
+                </div>
             </div>
 
             {/* Filters Bar */}
@@ -167,7 +275,7 @@ export const Inventory = () => {
                         <thead className="bg-gray-50/50 border-b border-gray-100">
                             <tr>
                                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase">Insumo</th>
-                                <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase">Tipo</th>
+                                <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase">Costo Unit.</th>
                                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase text-center">Disponible</th>
                                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase">Estado</th>
                                 <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase text-right">Control</th>
@@ -180,7 +288,7 @@ export const Inventory = () => {
                                         <p className="font-bold text-gray-900 text-sm">{item.name}</p>
                                         <p className="text-xs text-gray-500 font-mono mt-0.5">{item.sku}</p>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-gray-600 font-medium bg-gray-50/30">{item.category}</td>
+                                    <td className="px-6 py-4 text-sm text-gray-600 font-medium">Bs. {item.price}</td>
                                     <td className="px-6 py-4 text-center">
                                         <div className="inline-flex flex-col items-center">
                                             <span className={`text-lg font-bold ${item.quantity <= item.minStock ? 'text-red-600' : 'text-brand-900'}`}>{item.quantity}</span>
@@ -195,7 +303,7 @@ export const Inventory = () => {
                                     <td className="px-6 py-4 text-right">
                                         <div className="flex justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                             <button onClick={() => { setStockAdjustment({id: item.id, amount: 0, type: 'add'}); setIsStockModalOpen(true); }} className="p-2 bg-brand-50 text-brand-900 rounded-lg hover:bg-brand-100 border border-brand-100" title="Ajustar Stock"><Archive size={16}/></button>
-                                            <button onClick={() => openHistory(item)} className="p-2 bg-white text-gray-600 rounded-lg hover:bg-gray-50 border border-gray-200" title="Historial y Mermas"><History size={16}/></button>
+                                            <button onClick={() => openHistory(item)} className="p-2 bg-white text-gray-600 rounded-lg hover:bg-gray-50 border border-gray-200" title="Historial"><History size={16}/></button>
                                             {canManage && (
                                                 <>
                                                     <button onClick={() => { setEditingId(item.id); setNewItem(item); setIsModalOpen(true); }} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 border border-blue-100" title="Editar"><Edit3 size={16}/></button>
@@ -245,7 +353,6 @@ export const Inventory = () => {
                         </div>
                     </div>
                 ))}
-                {filteredItems.length === 0 && <div className="text-center py-10 text-gray-400 text-sm">No se encontraron insumos.</div>}
             </div>
 
             {/* Create/Edit Modal */}
@@ -291,7 +398,7 @@ export const Inventory = () => {
                 </div>
             )}
 
-            {/* Stock / Waste Modal (Accessible to all viewers to report waste, maybe restrict if needed) */}
+            {/* Stock / Waste Modal */}
             {isStockModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl mx-4">
@@ -336,7 +443,8 @@ export const Inventory = () => {
                                         </div>
                                         <div>
                                             <p className="text-sm font-bold text-gray-900">{m.type === 'in' ? 'Entrada' : m.type === 'waste' ? 'Merma (Daño)' : 'Uso General'}</p>
-                                            <p className="text-[10px] text-gray-400">{m.date}</p>
+                                            <p className="text-[10px] text-gray-400">{new Date(m.date).toLocaleDateString()} - {m.user}</p>
+                                            {m.costImpact && m.costImpact > 0 && <span className="text-[10px] text-red-500 font-bold block">Pérdida: Bs. {m.costImpact}</span>}
                                         </div>
                                     </div>
                                     <span className={`font-bold ${m.type === 'in' ? 'text-green-600' : 'text-gray-700'}`}>{m.type === 'in' ? '+' : '-'}{m.amount}</span>
