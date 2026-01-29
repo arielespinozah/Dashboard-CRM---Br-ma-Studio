@@ -160,8 +160,14 @@ export const Projects = () => {
       }
   };
 
+  // --- SHARE LINK LOGIC ---
   const handleCopyLink = (token: string) => {
-      const link = `${window.location.origin}${window.location.pathname}#/p/${token}`;
+      // Robust link generation handling potential path issues in different environments
+      let baseUrl = window.location.href.split('#')[0];
+      if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+      
+      const link = `${baseUrl}/#/p/${token}`;
+      
       navigator.clipboard.writeText(link);
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
@@ -275,8 +281,10 @@ export const Projects = () => {
                                             </td>
                                             <td className="px-6 py-4 text-sm text-gray-600">{new Date(project.dueDate).toLocaleDateString()}</td>
                                             <td className="px-6 py-4 text-right">
-                                                <button onClick={(e) => handleEdit(project, e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit3 size={16}/></button>
-                                                <button onClick={(e) => handleDelete(project.id, e)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
+                                                <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
+                                                    <button onClick={(e) => handleEdit(project, e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit3 size={16}/></button>
+                                                    <button onClick={(e) => handleDelete(project.id, e)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
+                                                </div>
                                             </td>
                                         </tr>
                                     );
@@ -288,7 +296,7 @@ export const Projects = () => {
             )}
         </div>
 
-        {/* Project Details Drawer (Admin Control Center) */}
+        {/* Project Details Drawer */}
         {activeProject && (
             <div className="fixed inset-y-0 right-0 w-full md:w-[500px] bg-white shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300 border-l border-gray-200">
                 <div className="p-6 border-b border-gray-200 flex justify-between items-start bg-gray-50">
@@ -311,7 +319,7 @@ export const Projects = () => {
                             <span className="text-[10px] text-brand-700 bg-white px-2 py-0.5 rounded-full border border-brand-100">Solo Lectura</span>
                         </div>
                         <div className="flex gap-2">
-                            <input readOnly value={`${window.location.origin}${window.location.pathname}#/p/${activeProject.clientViewToken}`} className="flex-1 text-xs bg-white border border-brand-200 rounded-lg px-3 py-2 text-gray-600 outline-none select-all" />
+                            <input readOnly value={`${window.location.href.split('#')[0]}#/p/${activeProject.clientViewToken}`} className="flex-1 text-xs bg-white border border-brand-200 rounded-lg px-3 py-2 text-gray-600 outline-none select-all" />
                             <button onClick={() => handleCopyLink(activeProject.clientViewToken!)} className="bg-brand-900 text-white px-3 rounded-lg hover:bg-brand-800 transition-colors">
                                 {linkCopied ? <Check size={16}/> : <Copy size={16}/>}
                             </button>

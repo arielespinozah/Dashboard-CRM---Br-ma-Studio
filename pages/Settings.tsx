@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Save, Upload, Building, FileText, CreditCard, Users, Trash2, Plus, Check, DollarSign, Database, MessageSquare, Download, Lock, User as UserIcon, Edit3, X, Shield, Printer, Mail, Link as LinkIcon, RefreshCw, Palette, FileJson, AlertTriangle } from 'lucide-react';
 import { AppSettings, User } from '../types';
@@ -24,6 +23,7 @@ const defaultSettings: AppSettings = {
     decimals: 2,
     taxRate: 13,
     taxName: 'IVA',
+    taxIdLabel: 'NIT',
     signatureName: 'Ariel Espinoza Heredia',
     signatureTitle: 'CEO PROPIETARIO'
 };
@@ -379,7 +379,7 @@ export const Settings = () => {
                 {/* Sidebar Navigation */}
                 <div className="w-full md:w-64 space-y-1">
                     <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-2">Cuenta</p>
-                    <button onClick={() => setActiveTab('profile')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'profile' ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}`}><UserIcon size={18} /> Mi Perfil</button>
+                    <button onClick={() => setActiveTab('profile')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'profile' ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}><UserIcon size={18} /> Mi Perfil</button>
                     <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mt-6">Sistema</p>
                     {[
                         { id: 'company', icon: Building, label: 'Empresa & App' },
@@ -388,7 +388,7 @@ export const Settings = () => {
                         { id: 'finance', icon: DollarSign, label: 'Moneda e Impuestos' },
                         { id: 'backup', icon: Database, label: 'Respaldo de Datos' },
                     ].map((tab) => (
-                        <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:bg-gray-100'}`}>
+                        <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
                             <tab.icon size={18} /> {tab.label}
                         </button>
                     ))}
@@ -542,10 +542,14 @@ export const Settings = () => {
                     {activeTab === 'finance' && (
                         <div className="space-y-6">
                             <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
-                                <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Impuestos</h2>
+                                <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2">Impuestos e Identificación</h2>
                                 <div className="grid grid-cols-2 gap-6">
-                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Impuesto</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.taxName} onChange={(e) => handleChange('taxName', e.target.value)} /></div>
+                                    <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Impuesto (Ej. IVA)</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.taxName} onChange={(e) => handleChange('taxName', e.target.value)} /></div>
                                     <div><label className="block text-sm font-medium text-gray-700 mb-1">Tasa (%)</label><input type="number" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.taxRate} onChange={(e) => handleChange('taxRate', Number(e.target.value))} /></div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Documento Identidad (Ej. NIT, RUC, CUIT)</label>
+                                    <input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.taxIdLabel || 'NIT'} onChange={(e) => handleChange('taxIdLabel', e.target.value)} placeholder="NIT" />
                                 </div>
                             </div>
 
@@ -563,8 +567,8 @@ export const Settings = () => {
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Posición del Símbolo</label>
                                         <select className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.currencyPosition} onChange={(e) => handleChange('currencyPosition', e.target.value as any)}>
-                                            <option value="before">Antes (Bs 100)</option>
-                                            <option value="after">Después (100 Bs)</option>
+                                            <option value="before" className="bg-white text-gray-900">Antes (Bs 100)</option>
+                                            <option value="after" className="bg-white text-gray-900">Después (100 Bs)</option>
                                         </select>
                                     </div>
                                     <div>
@@ -663,7 +667,7 @@ export const Settings = () => {
                             {/* ... User Form Fields ... */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Nombre</label><input required className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-brand-900 outline-none text-gray-900" value={editingUser.name} onChange={e => setEditingUser({...editingUser, name: e.target.value})} /></div>
-                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Rol</label><select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-brand-900 outline-none text-gray-900" value={editingUser.role} onChange={e => setEditingUser({...editingUser, role: e.target.value as any})}><option value="Sales">Vendedor</option><option value="Admin">Admin</option></select></div>
+                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Rol</label><select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-brand-900 outline-none text-gray-900" value={editingUser.role} onChange={e => setEditingUser({...editingUser, role: e.target.value as any})}><option value="Sales" className="bg-white text-gray-900">Vendedor</option><option value="Admin" className="bg-white text-gray-900">Admin</option></select></div>
                             </div>
                             <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Email</label><input required type="email" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:border-brand-900 outline-none text-gray-900" value={editingUser.email} onChange={e => setEditingUser({...editingUser, email: e.target.value})} /></div>
                             
@@ -693,7 +697,7 @@ export const Settings = () => {
 
                             <div className="flex gap-4">
                                 <div className="flex-1"><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">{editingUser.id ? 'Nueva Clave' : 'Clave'}</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:border-brand-900 outline-none" placeholder={editingUser.id ? "Opcional" : "Requerido"} value={editingUser.password || ''} onChange={e => setEditingUser({...editingUser, password: e.target.value})} required={!editingUser.id} /></div>
-                                <div className="w-1/3"><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Estado</label><select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:border-brand-900 outline-none" value={editingUser.active ? 'active' : 'inactive'} onChange={e => setEditingUser({...editingUser, active: e.target.value === 'active'})}><option value="active">Activo</option><option value="inactive">Inactivo</option></select></div>
+                                <div className="w-1/3"><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Estado</label><select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:border-brand-900 outline-none" value={editingUser.active ? 'active' : 'inactive'} onChange={e => setEditingUser({...editingUser, active: e.target.value === 'active'})}><option value="active" className="bg-white text-gray-900">Activo</option><option value="inactive" className="bg-white text-gray-900">Inactivo</option></select></div>
                             </div>
                             <button type="submit" className="w-full py-3 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 mt-2">Guardar Usuario</button>
                         </form>

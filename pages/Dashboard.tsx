@@ -105,6 +105,11 @@ export const Dashboard = () => {
   }, []);
 
   const currencySymbol = settings?.currencySymbol || 'Bs';
+  
+  // Format without decimals for compact view
+  const formatCompact = (val: number) => {
+      return val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10">
@@ -128,7 +133,7 @@ export const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <KPICard 
             title="Ingresos Totales" 
-            value={`${currencySymbol} ${totalIncome.toLocaleString()}`} 
+            value={`${currencySymbol} ${formatCompact(totalIncome)}`} 
             icon={DollarSign} 
             positive={true} 
             colorClass="bg-green-50 text-green-600" 
@@ -211,7 +216,7 @@ export const Dashboard = () => {
                                   <p className="text-xs text-gray-500">{sale.clientName}</p>
                               </div>
                           </div>
-                          <span className="text-sm font-bold text-brand-900">{currencySymbol} {sale.total}</span>
+                          <span className="text-sm font-bold text-brand-900">{currencySymbol} {formatCompact(sale.total)}</span>
                       </div>
                   )) : <p className="text-sm text-gray-400 text-center py-4">No hay ventas recientes.</p>}
               </div>

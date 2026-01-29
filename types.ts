@@ -12,10 +12,22 @@ export enum Priority {
   HIGH = 'HIGH'
 }
 
+export interface AuditLog {
+    id: string;
+    action: 'Create' | 'Update' | 'Delete' | 'Login';
+    module: 'Sales' | 'Quotes' | 'Inventory' | 'Finance' | 'Projects' | 'Clients';
+    description: string;
+    user: string;
+    role: string;
+    timestamp: string;
+    metadata?: string; // Stores deleted amount, client name, etc. for evidence
+}
+
 export interface Client {
   id: string;
   name: string;
   company: string;
+  nit?: string; // Added NIT
   email: string;
   phone: string;
   address?: string;
@@ -68,6 +80,7 @@ export interface Quote {
   status: 'Draft' | 'Sent' | 'Approved' | 'Paid' | 'Rejected';
   notes?: string;
   taxEnabled?: boolean;
+  termsAndConditions?: string; // New field for custom terms
 }
 
 export interface Sale {
@@ -139,6 +152,7 @@ export interface AppSettings {
   decimals: number;
   taxRate: number;
   taxName: string;
+  taxIdLabel?: string; // Custom label for NIT/RUC/CI
 }
 
 export interface User {

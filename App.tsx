@@ -15,6 +15,7 @@ import { Finance } from './pages/Finance';
 import { Calendar } from './pages/Calendar';
 import { Login } from './pages/Login';
 import { ClientProjectView } from './pages/ClientProjectView';
+import { DocumentViewer } from './pages/DocumentViewer';
 import { User } from './types';
 import { auth } from './firebase';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -104,8 +105,9 @@ function App() {
       <Routes>
         <Route path="/login" element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/" />} />
         
-        {/* PUBLIC ROUTE FOR CLIENTS */}
+        {/* PUBLIC ROUTES */}
         <Route path="/p/:token" element={<ClientProjectView />} />
+        <Route path="/view/:type/:id" element={<DocumentViewer />} />
 
         <Route path="/" element={
             <ProtectedRoute user={user}>

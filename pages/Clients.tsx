@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, RefreshCw, ChevronRight, Check, Briefcase, ShoppingBag, Upload, Download, FileSpreadsheet } from 'lucide-react';
-import { Client, Sale } from '../types';
+import { Users, Search, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, RefreshCw, ChevronRight, Check, Briefcase, ShoppingBag, Upload, Download, FileSpreadsheet, CreditCard } from 'lucide-react';
+import { Client, Sale, AppSettings } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
@@ -16,6 +16,8 @@ export const Clients = () => {
       return saved ? JSON.parse(saved) : [];
   });
   
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  
   const [isLoaded, setIsLoaded] = useState(false); 
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -28,7 +30,7 @@ export const Clients = () => {
   const [drawerTab, setDrawerTab] = useState<'Info' | 'History'>('Info');
 
   const [formData, setFormData] = useState<Partial<Client>>({
-    name: '', company: '', email: '', phone: '', address: '', type: 'Prospect', notes: ''
+    name: '', company: '', nit: '', email: '', phone: '', address: '', type: 'Prospect', notes: ''
   });
 
   // Fetch from cloud on mount
@@ -45,6 +47,13 @@ export const Clients = () => {
               if(salesSnap.exists()) {
                   setSales(salesSnap.data().list);
                   localStorage.setItem('crm_sales_history', JSON.stringify(salesSnap.data().list));
+              }
+              const settingsSnap = await getDoc(doc(db, 'crm_data', 'settings'));
+              if(settingsSnap.exists()) {
+                  setSettings(settingsSnap.data() as AppSettings);
+              } else {
+                  const local = localStorage.getItem('crm_settings');
+                  if(local) setSettings(JSON.parse(local));
               }
           } catch (e) { console.error("Error fetching data", e); }
           finally { setIsLoaded(true); }
@@ -70,6 +79,7 @@ export const Clients = () => {
           ID: c.id,
           Nombre: c.name,
           Empresa: c.company,
+          [settings?.taxIdLabel || 'NIT']: c.nit,
           Email: c.email,
           Telefono: c.phone,
           Direccion: c.address,
@@ -84,8 +94,9 @@ export const Clients = () => {
   };
 
   const handleDownloadTemplate = () => {
+      const taxLabel = settings?.taxIdLabel || 'NIT';
       const template = [
-          { Nombre: "Ejemplo Juan", Empresa: "Empresa S.A.", Email: "juan@ejemplo.com", Telefono: "70012345", Direccion: "Av. Siempre Viva", Tipo: "Cliente", Notas: "Nota opcional" }
+          { Nombre: "Ejemplo Juan", Empresa: "Empresa S.A.", [taxLabel]: "1234567", Email: "juan@ejemplo.com", Telefono: "70012345", Direccion: "Av. Siempre Viva", Tipo: "Cliente", Notas: "Nota opcional" }
       ];
       const ws = XLSX.utils.json_to_sheet(template);
       const wb = XLSX.utils.book_new();
@@ -104,11 +115,13 @@ export const Clients = () => {
           const wsname = wb.SheetNames[0];
           const ws = wb.Sheets[wsname];
           const data = XLSX.utils.sheet_to_json(ws);
+          const taxLabel = settings?.taxIdLabel || 'NIT';
 
           const newClients: Client[] = data.map((row: any) => ({
               id: Math.random().toString(36).substr(2, 9),
               name: row.Nombre || 'Sin Nombre',
               company: row.Empresa || '',
+              nit: row[taxLabel] || row['NIT'] || '',
               email: row.Email || '',
               phone: row.Telefono || '',
               address: row.Direccion || '',
@@ -151,7 +164,7 @@ export const Clients = () => {
 
   const openNewClient = () => {
     setEditingId(null);
-    setFormData({ name: '', company: '', email: '', phone: '', address: '', type: 'Prospect', notes: '' });
+    setFormData({ name: '', company: '', nit: '', email: '', phone: '', address: '', type: 'Prospect', notes: '' });
     setIsModalOpen(true);
   };
 
@@ -164,6 +177,7 @@ export const Clients = () => {
             id: Math.random().toString(36).substr(2, 9),
             name: formData.name || 'Nuevo Cliente',
             company: formData.company || '',
+            nit: formData.nit || '',
             email: formData.email || '',
             phone: formData.phone || '',
             address: formData.address,
@@ -226,14 +240,14 @@ export const Clients = () => {
           </div>
       </div>
 
-      <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">
+      <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 text-xs font-bold text-gray-700 uppercase tracking-wider bg-gray-100 rounded-t-xl border-b border-gray-200">
           <div className="col-span-4">Nombre / Empresa</div>
           <div className="col-span-3">Correo Electrónico</div>
           <div className="col-span-3">Teléfono</div>
           <div className="col-span-2 text-right">Estado</div>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-2 pb-12">
+      <div className="flex-1 overflow-y-auto space-y-2 pb-12 bg-white md:bg-transparent rounded-b-xl border border-gray-100 md:border-none">
         {filteredClients.map(client => (
           <div key={client.id} onClick={() => { setSelectedClient(client); setDrawerTab('Info'); }} className={`bg-white rounded-xl p-4 border transition-all cursor-pointer group hover:shadow-md ${selectedClient?.id === client.id ? 'border-brand-500 ring-1 ring-brand-200 bg-brand-50/10' : 'border-gray-100 hover:border-brand-200'}`}>
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
@@ -245,7 +259,6 @@ export const Clients = () => {
                     </div>
                 </div>
                 
-                {/* Mobile: Show contact info in a cleaner way */}
                 <div className="col-span-1 md:col-span-3 flex md:hidden flex-col gap-1 mt-1">
                      <div className="flex items-center text-xs text-gray-600"><Mail size={12} className="mr-2 text-gray-400"/>{client.email || 'No email'}</div>
                      <div className="flex items-center text-xs text-gray-600"><Phone size={12} className="mr-2 text-gray-400"/>{client.phone || 'No telf.'}</div>
@@ -266,7 +279,7 @@ export const Clients = () => {
 
       {/* Client Details Drawer */}
       {selectedClient && (
-          <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-white shadow-2xl z-40 border-l border-gray-200 animate-in slide-in-from-right duration-300 flex flex-col">
+          <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-white shadow-2xl z-[100] border-l border-gray-200 animate-in slide-in-from-right duration-300 flex flex-col">
               <div className="p-6 border-b border-gray-100 bg-gray-50/50">
                   <div className="flex justify-between items-start mb-4">
                       <div className="flex gap-4 items-center">
@@ -293,6 +306,12 @@ export const Clients = () => {
 
                           <div className="space-y-4">
                               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100 pb-2">Información de Contacto</h3>
+                              {selectedClient.nit && (
+                                <div className="flex items-center gap-3 text-sm text-gray-700">
+                                    <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400"><CreditCard size={16}/></div>
+                                    <span className="font-mono">{selectedClient.nit} <span className="text-xs text-gray-400 ml-1">({settings?.taxIdLabel || 'NIT'})</span></span>
+                                </div>
+                              )}
                               <div className="flex items-center gap-3 text-sm text-gray-700"><div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400"><Mail size={16}/></div>{selectedClient.email || <span className="text-gray-400 italic">No registrado</span>}</div>
                               <div className="flex items-center gap-3 text-sm text-gray-700"><div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400"><Phone size={16}/></div>{selectedClient.phone || <span className="text-gray-400 italic">No registrado</span>}</div>
                               <div className="flex items-center gap-3 text-sm text-gray-700"><div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center text-gray-400"><MapPin size={16}/></div>{selectedClient.address || <span className="text-gray-400 italic">No registrada</span>}</div>
@@ -342,7 +361,7 @@ export const Clients = () => {
 
       {/* Modal Form */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
               <h3 className="font-semibold text-lg text-gray-900">{editingId ? 'Editar Cliente' : 'Nuevo Cliente'}</h3>
@@ -354,11 +373,18 @@ export const Clients = () => {
                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label><input type="text" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900" value={formData.company} onChange={e => setFormData({...formData, company: e.target.value})} /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Email</label><input type="email" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
+                 <div><label className="block text-sm font-medium text-gray-700 mb-1">{settings?.taxIdLabel || 'NIT'}</label><input type="text" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900" value={formData.nit} onChange={e => setFormData({...formData, nit: e.target.value})} /></div>
                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Teléfono</label><input type="text" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} /></div>
               </div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Email</label><input type="email" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Dirección</label><input type="text" className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label><select className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})}><option value="Prospect">Prospecto</option><option value="Client">Cliente</option></select></div>
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                  <div className="relative">
+                      <select className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 appearance-none" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})}><option value="Prospect" className="bg-white text-gray-900">Prospecto</option><option value="Client" className="bg-white text-gray-900">Cliente</option></select>
+                      <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90 pointer-events-none" size={16}/>
+                  </div>
+              </div>
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Notas</label><textarea className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 h-20 resize-none" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} placeholder="Información adicional..." /></div>
               <div className="pt-4 flex gap-3">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors bg-white">Cancelar</button>

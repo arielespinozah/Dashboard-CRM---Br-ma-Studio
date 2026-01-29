@@ -89,10 +89,17 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
         if (foundUser) {
             if (foundUser.active) {
-                if (email === 'admin@brama.com.bo' && password === 'admin') isAuthenticated = true;
-                else if (email === 'ventas@brama.com.bo' && password === 'ventas') isAuthenticated = true;
-                else if (password.length > 3) isAuthenticated = true; 
-                else setError('Contraseña incorrecta');
+                // Strict password check
+                if (foundUser.password && foundUser.password === password) {
+                    isAuthenticated = true;
+                } else if (email === 'admin@brama.com.bo' && password === 'admin') {
+                    // Backdoor for default only if password matches default
+                    isAuthenticated = true;
+                } else if (email === 'ventas@brama.com.bo' && password === 'ventas') {
+                    isAuthenticated = true;
+                } else {
+                    setError('Contraseña incorrecta');
+                }
             } else {
                 setError('Usuario desactivado. Contacte al administrador.');
             }

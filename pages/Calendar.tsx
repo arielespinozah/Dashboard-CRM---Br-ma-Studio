@@ -199,15 +199,15 @@ export const Calendar = () => {
                             <select 
                                 value={currentDate.getMonth()} 
                                 onChange={handleMonthChange}
-                                className="bg-transparent font-bold text-sm text-gray-900 outline-none cursor-pointer hover:text-black focus:ring-0 focus:outline-none"
+                                className="bg-white font-bold text-sm text-gray-900 outline-none cursor-pointer hover:text-black focus:ring-0 focus:outline-none"
                             >
-                                {months.map((m, i) => <option key={i} value={i}>{m}</option>)}
+                                {months.map((m, i) => <option key={i} value={i} className="bg-white text-gray-900">{m}</option>)}
                             </select>
                             <input 
                                 type="number" 
                                 value={currentDate.getFullYear()} 
                                 onChange={handleYearChange}
-                                className="w-14 bg-transparent font-bold text-sm text-gray-900 outline-none text-center hover:text-black focus:ring-0"
+                                className="w-14 bg-white font-bold text-sm text-gray-900 outline-none text-center hover:text-black focus:ring-0"
                             />
                         </div>
 
@@ -291,10 +291,10 @@ export const Calendar = () => {
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo</label>
                                 <select className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}>
-                                    <option value="Meeting">Reunión</option>
-                                    <option value="Reminder">Recordatorio</option>
-                                    <option value="Project">Hito de Proyecto</option>
-                                    <option value="Other">Otro</option>
+                                    <option value="Meeting" className="bg-white text-gray-900">Reunión</option>
+                                    <option value="Reminder" className="bg-white text-gray-900">Recordatorio</option>
+                                    <option value="Project" className="bg-white text-gray-900">Hito de Proyecto</option>
+                                    <option value="Other" className="bg-white text-gray-900">Otro</option>
                                 </select>
                             </div>
 
@@ -316,16 +316,16 @@ export const Calendar = () => {
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Vincular Cliente</label>
                                 <select className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" value={newEvent.linkedClientId} onChange={e => setNewEvent({...newEvent, linkedClientId: e.target.value})}>
-                                    <option value="">(Ninguno)</option>
-                                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    <option value="" className="bg-white text-gray-900">(Ninguno)</option>
+                                    {clients.map(c => <option key={c.id} value={c.id} className="bg-white text-gray-900">{c.name}</option>)}
                                 </select>
                             </div>
 
                             <div className="md:col-span-2">
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Vincular Proyecto</label>
                                 <select className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-brand-900 bg-white text-gray-900" value={newEvent.linkedProjectId} onChange={e => setNewEvent({...newEvent, linkedProjectId: e.target.value})}>
-                                    <option value="">(Ninguno)</option>
-                                    {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                                    <option value="" className="bg-white text-gray-900">(Ninguno)</option>
+                                    {projects.map(p => <option key={p.id} value={p.id} className="bg-white text-gray-900">{p.title}</option>)}
                                 </select>
                             </div>
 

@@ -222,9 +222,9 @@ export const Services = () => {
               </button>
           </div>
           <div className="flex gap-2 w-full md:w-auto">
-              <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} className="px-3 py-2 bg-gray-50 border border-transparent focus:bg-white focus:border-brand-200 rounded-lg text-sm outline-none transition-all text-gray-700 cursor-pointer">
-                  <option value="All">Todas</option>
-                  {categories.filter(c => c.type === activeTab).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} className="px-3 py-2 bg-white border border-transparent focus:bg-white focus:border-brand-200 rounded-lg text-sm outline-none transition-all text-gray-700 cursor-pointer">
+                  <option value="All" className="bg-white text-gray-900">Todas</option>
+                  {categories.filter(c => c.type === activeTab).map(c => <option key={c.id} value={c.name} className="bg-white text-gray-900">{c.name}</option>)}
               </select>
               <div className="relative flex-1 md:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
@@ -432,7 +432,7 @@ export const Services = () => {
                       <label className="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
                       <select required className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
                           <option value="" disabled>Seleccionar...</option>
-                          {categories.filter(c => c.type === activeTab).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                          {categories.filter(c => c.type === activeTab).map(c => <option key={c.id} value={c.name} className="bg-white text-gray-900">{c.name}</option>)}
                       </select>
                    </div>
                </div>

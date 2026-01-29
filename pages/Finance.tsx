@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Lock, Unlock, ArrowUp, ArrowDown, History, AlertTriangle, CheckCircle2, Calculator, Save, X, Plus } from 'lucide-react';
+import { DollarSign, Lock, Unlock, ArrowUp, ArrowDown, History, AlertTriangle, CheckCircle2, Calculator, Save, X, Plus, Trash2, Edit3 } from 'lucide-react';
 import { CashShift, CashTransaction, Sale, User } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
@@ -13,6 +13,10 @@ export const Finance = () => {
     const [isShiftModalOpen, setIsShiftModalOpen] = useState(false); // For Open/Close
     const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
     
+    // Edit Modal State
+    const [isEditShiftOpen, setIsEditShiftOpen] = useState(false);
+    const [editingShift, setEditingShift] = useState<CashShift | null>(null);
+    
     const [amountInput, setAmountInput] = useState<number>(0);
     const [descriptionInput, setDescriptionInput] = useState('');
     const [categoryInput, setCategoryInput] = useState<'Sale'|'Supply'|'Service'|'Other'>('Other');
@@ -20,6 +24,8 @@ export const Finance = () => {
     
     // Close Shift Calc
     const [finalCashCount, setFinalCashCount] = useState<number>(0);
+
+    const isAdmin = user?.role === 'Admin' || user?.permissions?.includes('all');
 
     useEffect(() => {
         const u = localStorage.getItem('crm_active_user');
@@ -111,6 +117,33 @@ export const Finance = () => {
         
         setAmountInput(0);
         setDescriptionInput('');
+    };
+
+    // Admin Functions
+    const handleDeleteShift = (id: string) => {
+        if (confirm('¿Eliminar registro de caja permanentemente? Esto no se puede deshacer.')) {
+            const updated = shifts.filter(s => s.id !== id);
+            saveShifts(updated);
+            if (currentShift?.id === id) setCurrentShift(null);
+        }
+    };
+
+    const openEditShift = (shift: CashShift) => {
+        setEditingShift({...shift});
+        setIsEditShiftOpen(true);
+    };
+
+    const handleSaveEditShift = (e: React.FormEvent) => {
+        e.preventDefault();
+        if(!editingShift) return;
+        
+        // Recalculate difference if finalAmount changed manually
+        const diff = (editingShift.finalAmount || 0) - (editingShift.systemCalculatedAmount || 0);
+        const updatedShift = { ...editingShift, difference: diff };
+
+        const updatedList = shifts.map(s => s.id === editingShift.id ? updatedShift : s);
+        saveShifts(updatedList);
+        setIsEditShiftOpen(false);
     };
 
     // Calculate totals for current shift
@@ -214,6 +247,7 @@ export const Finance = () => {
                                 <th className="px-6 py-4 text-right">Sistema</th>
                                 <th className="px-6 py-4 text-right">Real (Físico)</th>
                                 <th className="px-6 py-4 text-right">Diferencia</th>
+                                {isAdmin && <th className="px-6 py-4 text-right">Admin</th>}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50 text-sm">
@@ -229,10 +263,18 @@ export const Finance = () => {
                                             {s.difference && s.difference > 0 ? '+' : ''}{s.difference?.toFixed(2)}
                                         </span>
                                     </td>
+                                    {isAdmin && (
+                                        <td className="px-6 py-4 text-right">
+                                            <div className="flex justify-end gap-1">
+                                                <button onClick={() => openEditShift(s)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Corregir"><Edit3 size={16}/></button>
+                                                <button onClick={() => handleDeleteShift(s.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Borrar Registro"><Trash2 size={16}/></button>
+                                            </div>
+                                        </td>
+                                    )}
                                 </tr>
                             ))}
                             {shifts.filter(s => s.status === 'Closed').length === 0 && (
-                                <tr><td colSpan={6} className="text-center py-8 text-gray-400">No hay historial disponible.</td></tr>
+                                <tr><td colSpan={isAdmin ? 7 : 6} className="text-center py-8 text-gray-400">No hay historial disponible.</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -302,16 +344,40 @@ export const Finance = () => {
                              <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Categoría</label>
                                 <select className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:border-brand-900 outline-none text-gray-900 bg-white" value={categoryInput} onChange={e => setCategoryInput(e.target.value as any)}>
-                                    <option value="Other">Varios / Otros</option>
-                                    <option value="Supply">Compra de Insumos</option>
-                                    <option value="Service">Servicios Básicos</option>
-                                    <option value="Sale">Venta Directa</option>
+                                    <option value="Other" className="bg-white text-gray-900">Varios / Otros</option>
+                                    <option value="Supply" className="bg-white text-gray-900">Compra de Insumos</option>
+                                    <option value="Service" className="bg-white text-gray-900">Servicios Básicos</option>
+                                    <option value="Sale" className="bg-white text-gray-900">Venta Directa</option>
                                 </select>
                             </div>
                             <button onClick={handleTransaction} className={`w-full py-3 text-white rounded-xl font-bold shadow-lg mt-2 ${transactionType === 'Income' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-500 hover:bg-red-600'}`}>
                                 Confirmar Movimiento
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal Edit Shift (Admin) */}
+            {isEditShiftOpen && editingShift && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in duration-200">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-lg text-gray-900">Corregir Cierre</h3>
+                            <button onClick={() => setIsEditShiftOpen(false)}><X size={20} className="text-gray-400"/></button>
+                        </div>
+                        <p className="text-xs text-red-500 mb-4 bg-red-50 p-2 rounded">Solo editar en caso de error humano.</p>
+                        <form onSubmit={handleSaveEditShift} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto Inicial</label>
+                                <input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white" value={editingShift.initialAmount} onChange={e => setEditingShift({...editingShift, initialAmount: Number(e.target.value)})} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto Final Real (Físico)</label>
+                                <input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white" value={editingShift.finalAmount} onChange={e => setEditingShift({...editingShift, finalAmount: Number(e.target.value)})} />
+                            </div>
+                            <button type="submit" className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-md">Guardar Corrección</button>
+                        </form>
                     </div>
                 </div>
             )}
