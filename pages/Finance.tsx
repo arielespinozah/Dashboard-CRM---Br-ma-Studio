@@ -213,17 +213,17 @@ export const Finance = () => {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Finanzas & Caja</h1>
                     <p className="text-sm text-gray-500">Control de ingresos, egresos y arqueo de caja</p>
                 </div>
                 {!currentShift ? (
-                    <button onClick={() => { setAmountInput(''); setIsShiftModalOpen(true); }} className="bg-green-600 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg hover:bg-green-700 flex items-center gap-2">
+                    <button onClick={() => { setAmountInput(''); setIsShiftModalOpen(true); }} className="w-full sm:w-auto bg-green-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-green-700 flex items-center justify-center gap-2 min-h-[48px] active:scale-95 transition-transform">
                         <Unlock size={18} /> Abrir Caja
                     </button>
                 ) : (
-                    <button onClick={() => { setFinalCashCount(''); setIsShiftModalOpen(true); }} className="bg-brand-900 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg hover:bg-brand-800 flex items-center gap-2 border border-brand-700">
+                    <button onClick={() => { setFinalCashCount(''); setIsShiftModalOpen(true); }} className="w-full sm:w-auto bg-brand-900 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-brand-800 flex items-center justify-center gap-2 border border-brand-700 min-h-[48px] active:scale-95 transition-transform">
                         <Lock size={18} /> Cerrar Caja (Arqueo)
                     </button>
                 )}
@@ -258,9 +258,9 @@ export const Finance = () => {
                     <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm col-span-1 md:col-span-3 lg:col-span-2 flex flex-col">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
                             <h3 className="font-bold text-gray-900">Movimientos del Turno</h3>
-                            <div className="flex gap-2">
-                                <button onClick={() => { setTransactionType('Income'); setCategoryInput('Other'); setAmountInput(''); setIsTransactionModalOpen(true); }} className="px-4 py-2 bg-green-50 text-green-700 rounded-lg text-xs font-bold hover:bg-green-100 border border-green-200 flex items-center gap-1"><Plus size={14}/> Registrar Entrada</button>
-                                <button onClick={() => { setTransactionType('Expense'); setCategoryInput('Other'); setAmountInput(''); setIsTransactionModalOpen(true); }} className="px-4 py-2 bg-red-50 text-red-700 rounded-lg text-xs font-bold hover:bg-red-100 border border-red-200 flex items-center gap-1"><ArrowDown size={14}/> Registrar Salida/Gasto</button>
+                            <div className="flex gap-2 w-full sm:w-auto">
+                                <button onClick={() => { setTransactionType('Income'); setCategoryInput('Other'); setAmountInput(''); setIsTransactionModalOpen(true); }} className="flex-1 sm:flex-none px-4 py-2.5 bg-green-50 text-green-700 rounded-xl text-xs font-bold hover:bg-green-100 border border-green-200 flex items-center justify-center gap-1 min-h-[44px]"><Plus size={16}/> Entrada</button>
+                                <button onClick={() => { setTransactionType('Expense'); setCategoryInput('Other'); setAmountInput(''); setIsTransactionModalOpen(true); }} className="flex-1 sm:flex-none px-4 py-2.5 bg-red-50 text-red-700 rounded-xl text-xs font-bold hover:bg-red-100 border border-red-200 flex items-center justify-center gap-1 min-h-[44px]"><ArrowDown size={16}/> Salida</button>
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2">
@@ -297,7 +297,8 @@ export const Finance = () => {
             {/* History Section */}
             <div className="mt-8">
                 <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><History size={18}/> Historial de Cierres</h3>
-                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                {/* Responsive Table/Cards */}
+                <div className="hidden md:block bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
                     <table className="w-full text-left">
                         <thead className="bg-gray-50 border-b border-gray-100 text-xs uppercase text-gray-500 font-bold">
                             <tr>
@@ -339,6 +340,33 @@ export const Finance = () => {
                         </tbody>
                     </table>
                 </div>
+
+                {/* Mobile Cards for History */}
+                <div className="md:hidden space-y-3">
+                    {shifts.filter(s => s.status === 'Closed').map(s => (
+                        <div key={s.id} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
+                            <div className="flex justify-between items-start mb-2">
+                                <div>
+                                    <p className="font-bold text-gray-900 text-sm">{new Date(s.closeDate!).toLocaleDateString()}</p>
+                                    <p className="text-xs text-gray-500">{new Date(s.closeDate!).toLocaleTimeString()} • {s.openedBy}</p>
+                                </div>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${!s.difference || Math.abs(s.difference) < 0.5 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                    Dif: {s.difference?.toFixed(2)}
+                                </span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm border-t border-gray-50 pt-2 mt-2">
+                                <div className="text-gray-500 text-xs">Sistema: {s.systemCalculatedAmount?.toFixed(2)}</div>
+                                <div className="font-bold text-brand-900">Real: Bs. {s.finalAmount?.toFixed(2)}</div>
+                            </div>
+                            {isAdmin && (
+                                <div className="flex justify-end gap-2 mt-3 pt-2 border-t border-gray-50">
+                                    <button onClick={() => openEditShift(s)} className="p-2 bg-blue-50 text-blue-600 rounded-lg min-h-[40px] min-w-[40px] flex items-center justify-center"><Edit3 size={18}/></button>
+                                    <button onClick={() => handleDeleteShift(s.id)} className="p-2 bg-red-50 text-red-600 rounded-lg min-h-[40px] min-w-[40px] flex items-center justify-center"><Trash2 size={18}/></button>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
             </div>
 
             {/* Modal Open/Close Shift */}
@@ -357,29 +385,29 @@ export const Finance = () => {
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto Inicial (Bs)</label>
-                                    <input autoFocus type="number" className="w-full text-center text-3xl font-bold border-b-2 border-gray-200 focus:border-green-500 outline-none py-2 text-gray-900" value={amountInput} onChange={e => setAmountInput(e.target.value)} placeholder="0.00" />
+                                    <input autoFocus type="number" className="w-full text-center text-4xl font-bold border-b-2 border-gray-200 focus:border-green-500 outline-none py-3 text-gray-900 bg-transparent tracking-tight" value={amountInput} onChange={e => setAmountInput(e.target.value)} placeholder="0.00" />
                                 </div>
-                                <button onClick={handleOpenShift} className="w-full py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg">Abrir Turno</button>
+                                <button onClick={handleOpenShift} className="w-full py-4 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg min-h-[56px] active:scale-95 transition-transform">Abrir Turno</button>
                             </div>
                         ) : (
                             <div className="space-y-4">
                                 <div className="bg-gray-50 p-3 rounded-lg text-center mb-4">
                                     <span className="text-xs text-gray-400 font-bold uppercase">Esperado en Sistema</span>
-                                    <p className="text-xl font-bold text-gray-700">Bs. {currentBalance.toFixed(2)}</p>
+                                    <p className="text-2xl font-bold text-gray-700">Bs. {currentBalance.toFixed(2)}</p>
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Conteo Físico Real (Bs)</label>
-                                    <input autoFocus type="number" className="w-full text-center text-3xl font-bold border-b-2 border-gray-200 focus:border-brand-900 outline-none py-2 text-gray-900" value={finalCashCount} onChange={e => setFinalCashCount(e.target.value)} placeholder="0.00" />
+                                    <input autoFocus type="number" className="w-full text-center text-4xl font-bold border-b-2 border-gray-200 focus:border-brand-900 outline-none py-3 text-gray-900 bg-transparent tracking-tight" value={finalCashCount} onChange={e => setFinalCashCount(e.target.value)} placeholder="0.00" />
                                 </div>
                                 {(Number(finalCashCount) > 0) && (
                                     <div className={`text-center text-sm font-bold ${Math.abs(Number(finalCashCount) - currentBalance) < 0.5 ? 'text-green-600' : 'text-red-500'}`}>
                                         Diferencia: {(Number(finalCashCount) - currentBalance).toFixed(2)}
                                     </div>
                                 )}
-                                <button onClick={handleCloseShift} className="w-full py-3 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 shadow-lg mt-2">Finalizar Turno</button>
+                                <button onClick={handleCloseShift} className="w-full py-4 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 shadow-lg mt-2 min-h-[56px] active:scale-95 transition-transform">Finalizar Turno</button>
                             </div>
                         )}
-                        <button onClick={() => setIsShiftModalOpen(false)} className="w-full mt-3 py-2 text-gray-500 font-medium hover:text-gray-900">Cancelar</button>
+                        <button onClick={() => setIsShiftModalOpen(false)} className="w-full mt-3 py-3 text-gray-500 font-medium hover:text-gray-900 min-h-[44px]">Cancelar</button>
                     </div>
                 </div>
             )}
@@ -390,27 +418,27 @@ export const Finance = () => {
                     <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in duration-200">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="font-bold text-lg text-gray-900">Registrar {transactionType === 'Income' ? 'Ingreso' : 'Salida / Gasto'}</h3>
-                            <button onClick={() => setIsTransactionModalOpen(false)}><X size={20} className="text-gray-400"/></button>
+                            <button onClick={() => setIsTransactionModalOpen(false)} className="text-gray-400 hover:text-red-600 p-1"><X size={24} /></button>
                         </div>
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto (Bs)</label>
-                                <input autoFocus type="number" className="w-full text-3xl font-bold border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-900 outline-none text-gray-900" value={amountInput} onChange={e => setAmountInput(e.target.value)} placeholder="0.00" />
+                                <input autoFocus type="number" className="w-full text-3xl font-bold border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-900 outline-none text-gray-900 bg-white" value={amountInput} onChange={e => setAmountInput(e.target.value)} placeholder="0.00" />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Descripción / Motivo</label>
-                                <input type="text" className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:border-brand-900 outline-none text-gray-900" value={descriptionInput} onChange={e => setDescriptionInput(e.target.value)} placeholder={transactionType === 'Expense' ? "Ej. Almuerzo personal, Pago luz..." : "Ej. Venta sin recibo..."} />
+                                <input type="text" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-brand-900 outline-none text-gray-900 bg-white min-h-[48px]" value={descriptionInput} onChange={e => setDescriptionInput(e.target.value)} placeholder={transactionType === 'Expense' ? "Ej. Almuerzo personal, Pago luz..." : "Ej. Venta sin recibo..."} />
                             </div>
                              <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Categoría</label>
-                                <select className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:border-brand-900 outline-none text-gray-900 bg-white" value={categoryInput} onChange={e => setCategoryInput(e.target.value as any)}>
+                                <select className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:border-brand-900 outline-none text-gray-900 bg-white min-h-[48px]" value={categoryInput} onChange={e => setCategoryInput(e.target.value as any)}>
                                     <option value="Other" className="bg-white text-gray-900">Varios / Otros</option>
                                     <option value="Supply" className="bg-white text-gray-900">Compra de Insumos</option>
                                     <option value="Service" className="bg-white text-gray-900">Servicios Básicos</option>
                                     <option value="Sale" className="bg-white text-gray-900">Venta Directa</option>
                                 </select>
                             </div>
-                            <button onClick={handleTransaction} className={`w-full py-3 text-white rounded-xl font-bold shadow-lg mt-2 ${transactionType === 'Income' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-500 hover:bg-red-600'}`}>
+                            <button onClick={handleTransaction} className={`w-full py-4 text-white rounded-xl font-bold shadow-lg mt-2 min-h-[56px] active:scale-95 transition-transform ${transactionType === 'Income' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-500 hover:bg-red-600'}`}>
                                 Confirmar Movimiento
                             </button>
                         </div>
@@ -424,19 +452,19 @@ export const Finance = () => {
                     <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in duration-200">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="font-bold text-lg text-gray-900">Corregir Cierre</h3>
-                            <button onClick={() => setIsEditShiftOpen(false)}><X size={20} className="text-gray-400"/></button>
+                            <button onClick={() => setIsEditShiftOpen(false)} className="text-gray-400 hover:text-red-600 p-1"><X size={24} /></button>
                         </div>
                         <p className="text-xs text-red-500 mb-4 bg-red-50 p-2 rounded">Advertencia: El sistema recalculará los totales basándose en las transacciones internas y el nuevo monto inicial.</p>
                         <form onSubmit={handleSaveEditShift} className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto Inicial Correcto</label>
-                                <input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white" value={editingShift.initialAmount} onChange={e => setEditingShift({...editingShift, initialAmount: Number(e.target.value)})} />
+                                <input type="number" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 bg-white min-h-[48px]" value={editingShift.initialAmount} onChange={e => setEditingShift({...editingShift, initialAmount: Number(e.target.value)})} />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto Final Real (Físico)</label>
-                                <input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-gray-900 bg-white" value={editingShift.finalAmount} onChange={e => setEditingShift({...editingShift, finalAmount: Number(e.target.value)})} />
+                                <input type="number" className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 bg-white min-h-[48px]" value={editingShift.finalAmount} onChange={e => setEditingShift({...editingShift, finalAmount: Number(e.target.value)})} />
                             </div>
-                            <button type="submit" className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-md">Guardar y Recalcular</button>
+                            <button type="submit" className="w-full py-3.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-md min-h-[52px]">Guardar y Recalcular</button>
                         </form>
                     </div>
                 </div>
