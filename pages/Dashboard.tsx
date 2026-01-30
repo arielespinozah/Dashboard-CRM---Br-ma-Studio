@@ -164,7 +164,7 @@ export const Dashboard = () => {
   const currencySymbol = settings?.currencySymbol || 'Bs';
   
   const formatCompact = (val: number) => {
-      return val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+      return (Number(val) || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   };
 
   const netProfit = totalIncome - totalExpenses;

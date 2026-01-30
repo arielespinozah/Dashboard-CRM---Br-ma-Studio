@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, MessageSquare, Send, Paperclip, MoreVertical, Phone, User, FileText, ShoppingBag, DollarSign, ChevronRight, Check, X, ArrowLeft, Settings as SettingsIcon, Briefcase, Zap } from 'lucide-react';
+import { Search, MessageSquare, Send, Paperclip, MoreVertical, Phone, User, FileText, ShoppingBag, DollarSign, ChevronRight, Check, X, ArrowLeft, Settings as SettingsIcon, Briefcase, Zap, RefreshCw } from 'lucide-react';
 import { Client, Quote, Sale, InventoryItem, ChatMessage } from '../types';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -27,8 +27,9 @@ export const Communications = () => {
     const [messageText, setMessageText] = useState('');
     const [showActionPanel, setShowActionPanel] = useState<'none' | 'quotes' | 'sales' | 'products' | 'services' | 'templates'>('none');
     
-    // Message History (Simulated CRM Thread)
-    const [messages, setMessages] = useState<Record<string, ExtendedChatMessage[]>>({});
+    // Chat States
+    const [currentMessages, setCurrentMessages] = useState<ExtendedChatMessage[]>([]);
+    const [isLoadingChat, setIsLoadingChat] = useState(false);
     const chatContainerRef = useRef<HTMLDivElement>(null);
 
     // Mobile Navigation
@@ -46,9 +47,9 @@ export const Communications = () => {
         "Nuestros horarios son de 9:00 a 18:00."
     ];
 
-    // Load all necessary CRM data
+    // Load Metadata (Clients, Quotes, Inventory) - Lightweight load
     useEffect(() => {
-        const loadData = async () => {
+        const loadMetadata = async () => {
             const loadLocalOrCloud = async (key: string, collection: string, setter: Function) => {
                 const local = localStorage.getItem(key);
                 if (local) setter(JSON.parse(local));
@@ -60,30 +61,58 @@ export const Communications = () => {
 
             await loadLocalOrCloud('crm_clients', 'clients', setClients);
             await loadLocalOrCloud('crm_quotes', 'quotes', setQuotes);
-            await loadLocalOrCloud('crm_sales_history', 'sales_history', setSales);
+            await loadLocalOrCloud('crm_sales_history', 'sales_history', setSales); // Note: This might need the same year-split logic if used heavily here
             await loadLocalOrCloud('crm_inventory', 'inventory', setInventory);
-            
-            // Load Chat History
-            const localMsgs = localStorage.getItem('crm_chat_history');
-            if(localMsgs) setMessages(JSON.parse(localMsgs));
-            try {
-                const msgSnap = await getDoc(doc(db, 'crm_data', 'chat_history'));
-                if(msgSnap.exists()) {
-                    setMessages(msgSnap.data().history);
-                    localStorage.setItem('crm_chat_history', JSON.stringify(msgSnap.data().history));
-                }
-            } catch(e) {}
         };
-        loadData();
+        loadMetadata();
     }, []);
 
+    // Auto-scroll to bottom
     useEffect(() => {
         if(chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
-    }, [messages, selectedClient]);
+    }, [currentMessages, isLoadingChat]);
 
-    const saveMessage = async (clientId: string, text: string, sender: 'me' | 'client') => {
+    // LOAD CHAT ON SELECT (On-Demand Architecture)
+    const handleClientSelect = async (client: Client) => {
+        setSelectedClient(client);
+        setShowMobileList(false); 
+        setShowActionPanel('none');
+        setIsLoadingChat(true);
+        setCurrentMessages([]); // Clear previous
+
+        try {
+            // Architecture: One document per client ID.
+            // Path: crm_data/chat_{clientId}
+            // Benefit: Distributes 1MB limit per client. Infinite scalability.
+            const chatId = `chat_${client.id}`;
+            
+            // Try Local Cache first
+            const localCache = localStorage.getItem(chatId);
+            if (localCache) {
+                setCurrentMessages(JSON.parse(localCache));
+            }
+
+            // Fetch Fresh from Cloud
+            const chatDoc = await getDoc(doc(db, 'crm_data', chatId));
+            if (chatDoc.exists()) {
+                const history = chatDoc.data().history as ExtendedChatMessage[];
+                // Merge or Replace? Replace is safer for sync.
+                setCurrentMessages(history);
+                localStorage.setItem(chatId, JSON.stringify(history));
+            } else if (!localCache) {
+                // New chat
+                setCurrentMessages([]);
+            }
+        } catch (e) {
+            console.error("Error loading chat", e);
+        } finally {
+            setIsLoadingChat(false);
+        }
+    };
+
+    const saveMessage = async (client: Client, text: string, sender: 'me' | 'client') => {
         const newMsg: ExtendedChatMessage = {
             id: Date.now().toString(),
             text,
@@ -92,19 +121,23 @@ export const Communications = () => {
             type: 'text'
         };
         
-        const updatedHistory = {
-            ...messages,
-            [clientId]: [...(messages[clientId] || []), newMsg]
-        };
+        const updatedHistory = [...currentMessages, newMsg]; // Append locally
+        setCurrentMessages(updatedHistory);
         
-        setMessages(updatedHistory);
-        localStorage.setItem('crm_chat_history', JSON.stringify(updatedHistory));
-        await setDoc(doc(db, 'crm_data', 'chat_history'), { history: updatedHistory });
+        // Save to Specific Client Doc (Scalable)
+        const chatId = `chat_${client.id}`;
+        localStorage.setItem(chatId, JSON.stringify(updatedHistory));
+        
+        // Fire and Forget Cloud Save
+        setDoc(doc(db, 'crm_data', chatId), { 
+            history: updatedHistory,
+            lastUpdated: new Date().toISOString(),
+            clientName: client.name 
+        }).catch(e => console.warn("Chat cloud sync fail", e));
     };
 
     const handleConnect = (e: React.FormEvent) => {
         e.preventDefault();
-        // Simulate saving credentials
         if(waPhoneId && waToken) {
             setIsConnected(true);
             localStorage.setItem('crm_wa_connected', 'true');
@@ -119,12 +152,6 @@ export const Communications = () => {
         }
     };
 
-    const handleClientSelect = (client: Client) => {
-        setSelectedClient(client);
-        setShowMobileList(false); 
-        setShowActionPanel('none');
-    };
-
     const handleBackToList = () => {
         setShowMobileList(true);
         setSelectedClient(null);
@@ -133,10 +160,10 @@ export const Communications = () => {
     const handleSendMessage = () => {
         if (!selectedClient || !messageText.trim()) return;
         
-        // 1. Save to internal history
-        saveMessage(selectedClient.id, messageText, 'me');
+        // 1. Save internally
+        saveMessage(selectedClient, messageText, 'me');
 
-        // 2. Open WhatsApp (Simulation of API Send)
+        // 2. Open WhatsApp
         const phone = selectedClient.phone.replace(/\D/g, ''); 
         const url = `https://wa.me/${phone}?text=${encodeURIComponent(messageText)}`;
         window.open(url, '_blank');
@@ -145,7 +172,6 @@ export const Communications = () => {
     };
 
     const handleQuickReply = (text: string) => {
-        // Smart Template Replacement
         let finalMsg = text;
         if (selectedClient) {
             finalMsg = finalMsg.replace('{nombre}', selectedClient.name.split(' ')[0]);
@@ -181,8 +207,6 @@ export const Communications = () => {
     const products = inventory.filter(i => i.type === 'Product');
     const services = inventory.filter(i => i.type === 'Service');
 
-    const currentMessages = selectedClient ? (messages[selectedClient.id] || []).sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) : [];
-
     // --- RENDER DISCONNECTED STATE ---
     if (!isConnected) {
         return (
@@ -191,7 +215,7 @@ export const Communications = () => {
                     <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
                         <MessageSquare size={40} className="text-[#25D366]" />
                     </div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-2">WhatsApp Business API</h2>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">WhatsApp Business CRM</h2>
                     <p className="text-gray-500 mb-8 text-sm">Conecta tu cuenta de Meta for Developers para habilitar el CRM de mensajería y automatización.</p>
                     
                     <form onSubmit={handleConnect} className="space-y-4 text-left">
@@ -247,7 +271,7 @@ export const Communications = () => {
                             </div>
                             <div className="flex-1 min-w-0">
                                 <h4 className="text-sm font-bold text-gray-900 truncate">{client.name}</h4>
-                                <p className="text-xs text-gray-500 truncate">{messages[client.id]?.slice(-1)[0]?.text || client.company || 'Sin mensajes'}</p>
+                                <p className="text-xs text-gray-500 truncate">{client.company || 'Haga clic para cargar chat'}</p>
                             </div>
                             {selectedClient?.id === client.id && <ChevronRight size={16} className="text-green-500"/>}
                         </div>
@@ -280,7 +304,16 @@ export const Communications = () => {
                         {/* Chat Area */}
                         <div className="flex-1 p-4 overflow-y-auto relative bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] bg-repeat opacity-90" ref={chatContainerRef}>
                             
-                            {currentMessages.length === 0 && (
+                            {isLoadingChat && (
+                                <div className="flex justify-center items-center py-10">
+                                    <div className="bg-white p-3 rounded-full shadow-md flex items-center gap-2">
+                                        <RefreshCw size={20} className="animate-spin text-green-600"/>
+                                        <span className="text-xs font-bold text-gray-600">Cargando historial...</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!isLoadingChat && currentMessages.length === 0 && (
                                 <div className="text-center py-8 bg-white/80 rounded-xl max-w-sm mx-auto shadow-sm backdrop-blur-sm mt-10">
                                     <p className="text-gray-500 text-sm">Esta es una nueva conversación.</p>
                                     <p className="text-xs text-gray-400 mt-1">Envía una plantilla o escribe un mensaje para iniciar.</p>

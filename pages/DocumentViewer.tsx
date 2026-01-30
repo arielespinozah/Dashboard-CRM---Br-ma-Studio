@@ -9,13 +9,14 @@ import html2canvas from 'html2canvas';
 
 // --- Shared Helper Functions (Duplicated to ensure standalone functionality) ---
 const formatCurrency = (amount: number, settings: AppSettings) => {
-    const val = amount.toLocaleString(undefined, { minimumFractionDigits: settings.decimals, maximumFractionDigits: settings.decimals });
+    const safeAmount = Number(amount) || 0;
+    const val = safeAmount.toLocaleString(undefined, { minimumFractionDigits: settings.decimals, maximumFractionDigits: settings.decimals });
     return settings.currencyPosition === 'before' ? `${settings.currencySymbol} ${val}` : `${val} ${settings.currencySymbol}`;
 };
 
 const convertNumberToWordsEs = (amount: number, currencyName: string) => {
     // Simplified for viewer, full implementation can be imported if extracted to utils
-    return `${amount.toFixed(2)} ${currencyName.toUpperCase()}`; 
+    return `${(Number(amount) || 0).toFixed(2)} ${currencyName.toUpperCase()}`; 
 };
 
 export const DocumentViewer = () => {

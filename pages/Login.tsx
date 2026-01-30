@@ -22,18 +22,28 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     const syncUsers = async () => {
         setSyncStatus('loading');
         try {
-            // Fetch Users
+            // Fetch Users - CRITICAL: Always prefer Cloud data
             const docRef = doc(db, 'crm_data', 'users');
             const docSnap = await getDoc(docRef);
             
             if (docSnap.exists()) {
                 const cloudUsers = docSnap.data().list as User[];
-                if (cloudUsers && cloudUsers.length > 0) {
+                if (cloudUsers && Array.isArray(cloudUsers) && cloudUsers.length > 0) {
                     localStorage.setItem('crm_users', JSON.stringify(cloudUsers));
+                    console.log("Usuarios sincronizados desde la nube.");
+                }
+            } else {
+                // Initial Seeding if DB is empty
+                const local = localStorage.getItem('crm_users');
+                if (!local) {
+                    const defaultUsers = [
+                        { id: '1', name: 'Admin Principal', email: 'admin@brama.com.bo', role: 'Admin', active: true, password: 'admin' }
+                    ];
+                    localStorage.setItem('crm_users', JSON.stringify(defaultUsers));
                 }
             }
 
-            // Fetch Settings for Logo & Colors
+            // Fetch Settings
             const settingsRef = doc(db, 'crm_data', 'settings');
             const settingsSnap = await getDoc(settingsRef);
             if (settingsSnap.exists()) {
@@ -41,17 +51,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 if(s.systemLogoUrl) setLogoUrl(s.systemLogoUrl);
                 if(s.primaryColor) setPrimaryColor(s.primaryColor);
                 if(s.companyName) setCompanyName(s.companyName);
-                
                 localStorage.setItem('crm_settings', JSON.stringify(s));
-            } else {
-                // Fallback to local
-                const localSettings = localStorage.getItem('crm_settings');
-                if (localSettings) {
-                    const parsed = JSON.parse(localSettings);
-                    if (parsed.systemLogoUrl) setLogoUrl(parsed.systemLogoUrl);
-                    if (parsed.primaryColor) setPrimaryColor(parsed.primaryColor);
-                    if (parsed.companyName) setCompanyName(parsed.companyName);
-                }
             }
 
             setSyncStatus('success');
@@ -73,29 +73,23 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         const storedUsers = localStorage.getItem('crm_users');
         let users: User[] = [];
         
-        if (storedUsers) {
-            users = JSON.parse(storedUsers);
-        } else {
-            // Fallback default admin if no DB connection yet
-            users = [
-                { id: '1', name: 'Admin Principal', email: 'admin@brama.com.bo', role: 'Admin', active: true },
-                { id: '2', name: 'Vendedor 1', email: 'ventas@brama.com.bo', role: 'Sales', active: true }
-            ];
-            localStorage.setItem('crm_users', JSON.stringify(users));
+        try {
+            if (storedUsers) {
+                users = JSON.parse(storedUsers);
+            }
+        } catch(e) {
+            setError("Error en datos locales. Recargue la página.");
+            return;
         }
 
-        const foundUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+        const foundUser = users.find(u => u.email.trim().toLowerCase() === email.trim().toLowerCase());
         let isAuthenticated = false;
 
         if (foundUser) {
             if (foundUser.active) {
                 // Strict password check
+                // NOTE: For production, passwords should be hashed (e.g., bcrypt) not plain text.
                 if (foundUser.password && foundUser.password === password) {
-                    isAuthenticated = true;
-                } else if (email === 'admin@brama.com.bo' && password === 'admin') {
-                    // Backdoor for default only if password matches default
-                    isAuthenticated = true;
-                } else if (email === 'ventas@brama.com.bo' && password === 'ventas') {
                     isAuthenticated = true;
                 } else {
                     setError('Contraseña incorrecta');
@@ -133,10 +127,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     
                     <div className="flex justify-center items-center gap-2 mt-4 h-6">
                         {syncStatus === 'loading' && <span className="text-xs text-blue-500 flex items-center gap-1"><RefreshCw size={12} className="animate-spin"/> Sincronizando usuarios...</span>}
-                        {syncStatus === 'success' && <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 size={12}/> Base de datos conectada</span>}
+                        {syncStatus === 'success' && <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle2 size={12}/> Sistema conectado</span>}
                         {syncStatus === 'error' && (
                             <button onClick={syncUsers} className="text-xs text-red-500 flex items-center gap-1 hover:underline bg-red-50 px-2 py-0.5 rounded cursor-pointer">
-                                <AlertTriangle size={12}/> Error de conexión. Reintentar
+                                <AlertTriangle size={12}/> Sin conexión. Usando datos locales.
                             </button>
                         )}
                     </div>

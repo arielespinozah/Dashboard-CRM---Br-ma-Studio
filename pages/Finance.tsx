@@ -4,26 +4,28 @@ import { CashShift, CashTransaction, Sale, User } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
+// --- SCALABILITY HELPER ---
+const getFinanceDocId = (year: string | number) => `finance_shifts_${year}`;
+
 export const Finance = () => {
     const [shifts, setShifts] = useState<CashShift[]>([]);
     const [currentShift, setCurrentShift] = useState<CashShift | null>(null);
     const [user, setUser] = useState<User | null>(null);
     
     // Modal States
-    const [isShiftModalOpen, setIsShiftModalOpen] = useState(false); // For Open/Close
+    const [isShiftModalOpen, setIsShiftModalOpen] = useState(false); 
     const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
     
     // Edit Modal State
     const [isEditShiftOpen, setIsEditShiftOpen] = useState(false);
     const [editingShift, setEditingShift] = useState<CashShift | null>(null);
     
-    const [amountInput, setAmountInput] = useState<number>(0);
+    const [amountInput, setAmountInput] = useState<number | string>(''); // String to avoid 0 on start
     const [descriptionInput, setDescriptionInput] = useState('');
     const [categoryInput, setCategoryInput] = useState<'Sale'|'Supply'|'Service'|'Other'>('Other');
     const [transactionType, setTransactionType] = useState<'Income'|'Expense'>('Expense');
     
-    // Close Shift Calc
-    const [finalCashCount, setFinalCashCount] = useState<number>(0);
+    const [finalCashCount, setFinalCashCount] = useState<number | string>('');
 
     const isAdmin = user?.role === 'Admin' || user?.permissions?.includes('all');
 
@@ -33,32 +35,66 @@ export const Finance = () => {
         
         const fetchShifts = async () => {
             try {
-                const docSnap = await getDoc(doc(db, 'crm_data', 'finance_shifts'));
-                if (docSnap.exists()) {
-                    const list = docSnap.data().list as CashShift[];
-                    // Sort descending date
-                    const sorted = list.sort((a,b) => new Date(b.openDate).getTime() - new Date(a.openDate).getTime());
-                    setShifts(sorted);
-                    const open = sorted.find(s => s.status === 'Open');
-                    if (open) setCurrentShift(open);
-                }
-            } catch(e) {}
+                // Architecture Update: Load multiple years to avoid 1MB limit on single doc
+                // Strategy: Load Legacy + Current Year + Previous Year
+                const currentYear = new Date().getFullYear();
+                const prevYear = currentYear - 1;
+
+                const [legacySnap, currentSnap, prevSnap] = await Promise.all([
+                    getDoc(doc(db, 'crm_data', 'finance_shifts')), // Old monolithic doc
+                    getDoc(doc(db, 'crm_data', getFinanceDocId(currentYear))), // 2025
+                    getDoc(doc(db, 'crm_data', getFinanceDocId(prevYear))) // 2024
+                ]);
+
+                let allShifts: CashShift[] = [];
+                if (legacySnap.exists()) allShifts = [...allShifts, ...legacySnap.data().list];
+                if (prevSnap.exists()) allShifts = [...allShifts, ...prevSnap.data().list];
+                if (currentSnap.exists()) allShifts = [...allShifts, ...currentSnap.data().list];
+
+                // Dedupe and Sort
+                const uniqueShifts = Array.from(new Map(allShifts.map(item => [item.id, item])).values());
+                const sorted = uniqueShifts.sort((a,b) => new Date(b.openDate).getTime() - new Date(a.openDate).getTime());
+                
+                setShifts(sorted);
+                
+                // Find first open shift (newest)
+                const open = sorted.find(s => s.status === 'Open');
+                if (open) setCurrentShift(open);
+
+            } catch(e) {
+                console.error("Finance sync error", e);
+            }
         };
         fetchShifts();
     }, []);
 
-    const saveShifts = async (newShifts: CashShift[]) => {
-        setShifts(newShifts);
-        await setDoc(doc(db, 'crm_data', 'finance_shifts'), { list: newShifts });
+    // --- SCALABLE SAVE ---
+    const saveShifts = async (updatedAllShifts: CashShift[]) => {
+        setShifts(updatedAllShifts);
+        
+        // Group by Year
+        const shiftsByYear: Record<string, CashShift[]> = {};
+        updatedAllShifts.forEach(shift => {
+            const year = new Date(shift.openDate).getFullYear();
+            if (!shiftsByYear[year]) shiftsByYear[year] = [];
+            shiftsByYear[year].push(shift);
+        });
+
+        // Save partitioned docs
+        Object.keys(shiftsByYear).forEach(year => {
+            const docId = getFinanceDocId(year);
+            setDoc(doc(db, 'crm_data', docId), { list: shiftsByYear[year] }).catch(e => console.error(e));
+        });
     };
 
     const handleOpenShift = () => {
         if (!user) return;
+        const initial = Number(amountInput) || 0;
         const newShift: CashShift = {
             id: Math.random().toString(36).substr(2, 9),
             openDate: new Date().toISOString(),
             openedBy: user.name,
-            initialAmount: amountInput,
+            initialAmount: initial,
             status: 'Open',
             transactions: []
         };
@@ -66,24 +102,26 @@ export const Finance = () => {
         saveShifts(updated);
         setCurrentShift(newShift);
         setIsShiftModalOpen(false);
-        setAmountInput(0);
+        setAmountInput('');
     };
 
     const handleCloseShift = () => {
         if (!currentShift) return;
         
+        const final = Number(finalCashCount) || 0;
+
         // Calculate Expected
-        const totalIncome = currentShift.transactions.filter(t => t.type === 'Income').reduce((acc, t) => acc + t.amount, 0);
-        const totalExpense = currentShift.transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + t.amount, 0);
-        const systemTotal = currentShift.initialAmount + totalIncome - totalExpense;
+        const totalIncome = currentShift.transactions.filter(t => t.type === 'Income').reduce((acc, t) => acc + (Number(t.amount)||0), 0);
+        const totalExpense = currentShift.transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + (Number(t.amount)||0), 0);
+        const systemTotal = (currentShift.initialAmount || 0) + totalIncome - totalExpense;
         
-        const diff = finalCashCount - systemTotal;
+        const diff = final - systemTotal;
 
         const closedShift: CashShift = {
             ...currentShift,
             status: 'Closed',
             closeDate: new Date().toISOString(),
-            finalAmount: finalCashCount,
+            finalAmount: final,
             systemCalculatedAmount: systemTotal,
             difference: diff
         };
@@ -92,15 +130,21 @@ export const Finance = () => {
         saveShifts(updated);
         setCurrentShift(null);
         setIsShiftModalOpen(false);
+        setFinalCashCount('');
     };
 
     const handleTransaction = () => {
         if (!currentShift || !user) return;
+        const amount = Number(amountInput);
+        if (amount <= 0 || isNaN(amount)) {
+            alert("Ingrese un monto válido");
+            return;
+        }
         
         const newTrans: CashTransaction = {
             id: Math.random().toString(36).substr(2, 9),
             description: descriptionInput || (transactionType === 'Income' ? 'Ingreso Manual' : 'Gasto Vario'),
-            amount: amountInput,
+            amount: amount,
             type: transactionType,
             category: categoryInput,
             date: new Date().toISOString(),
@@ -117,7 +161,7 @@ export const Finance = () => {
         setCurrentShift(updatedShift);
         setIsTransactionModalOpen(false);
         
-        setAmountInput(0);
+        setAmountInput('');
         setDescriptionInput('');
     };
 
@@ -139,15 +183,20 @@ export const Finance = () => {
         e.preventDefault();
         if(!editingShift) return;
         
+        const initial = Number(editingShift.initialAmount) || 0;
+        const final = Number(editingShift.finalAmount) || 0;
+
         // SECURITY: Re-calculate system totals based on transactions + new initial amount
-        const totalIncome = editingShift.transactions.filter(t => t.type === 'Income').reduce((acc, t) => acc + t.amount, 0);
-        const totalExpense = editingShift.transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + t.amount, 0);
+        const totalIncome = editingShift.transactions.filter(t => t.type === 'Income').reduce((acc, t) => acc + (Number(t.amount)||0), 0);
+        const totalExpense = editingShift.transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + (Number(t.amount)||0), 0);
         
-        const newSystemTotal = (Number(editingShift.initialAmount) || 0) + totalIncome - totalExpense;
-        const newDiff = (Number(editingShift.finalAmount) || 0) - newSystemTotal;
+        const newSystemTotal = initial + totalIncome - totalExpense;
+        const newDiff = final - newSystemTotal;
         
         const updatedShift = { 
             ...editingShift, 
+            initialAmount: initial,
+            finalAmount: final,
             systemCalculatedAmount: newSystemTotal,
             difference: newDiff 
         };
@@ -157,9 +206,9 @@ export const Finance = () => {
         setIsEditShiftOpen(false);
     };
 
-    // Calculate totals for current shift
-    const totalIncome = currentShift?.transactions.filter(t => t.type === 'Income').reduce((acc, t) => acc + t.amount, 0) || 0;
-    const totalExpense = currentShift?.transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + t.amount, 0) || 0;
+    // Calculate totals for current shift (Safeguarded)
+    const totalIncome = currentShift?.transactions.filter(t => t.type === 'Income').reduce((acc, t) => acc + (Number(t.amount)||0), 0) || 0;
+    const totalExpense = currentShift?.transactions.filter(t => t.type === 'Expense').reduce((acc, t) => acc + (Number(t.amount)||0), 0) || 0;
     const currentBalance = (currentShift?.initialAmount || 0) + totalIncome - totalExpense;
 
     return (
@@ -170,11 +219,11 @@ export const Finance = () => {
                     <p className="text-sm text-gray-500">Control de ingresos, egresos y arqueo de caja</p>
                 </div>
                 {!currentShift ? (
-                    <button onClick={() => { setAmountInput(0); setIsShiftModalOpen(true); }} className="bg-green-600 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg hover:bg-green-700 flex items-center gap-2">
+                    <button onClick={() => { setAmountInput(''); setIsShiftModalOpen(true); }} className="bg-green-600 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg hover:bg-green-700 flex items-center gap-2">
                         <Unlock size={18} /> Abrir Caja
                     </button>
                 ) : (
-                    <button onClick={() => { setFinalCashCount(0); setIsShiftModalOpen(true); }} className="bg-brand-900 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg hover:bg-brand-800 flex items-center gap-2 border border-brand-700">
+                    <button onClick={() => { setFinalCashCount(''); setIsShiftModalOpen(true); }} className="bg-brand-900 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg hover:bg-brand-800 flex items-center gap-2 border border-brand-700">
                         <Lock size={18} /> Cerrar Caja (Arqueo)
                     </button>
                 )}
@@ -210,8 +259,8 @@ export const Finance = () => {
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
                             <h3 className="font-bold text-gray-900">Movimientos del Turno</h3>
                             <div className="flex gap-2">
-                                <button onClick={() => { setTransactionType('Income'); setCategoryInput('Other'); setIsTransactionModalOpen(true); }} className="px-4 py-2 bg-green-50 text-green-700 rounded-lg text-xs font-bold hover:bg-green-100 border border-green-200 flex items-center gap-1"><Plus size={14}/> Registrar Entrada</button>
-                                <button onClick={() => { setTransactionType('Expense'); setCategoryInput('Other'); setIsTransactionModalOpen(true); }} className="px-4 py-2 bg-red-50 text-red-700 rounded-lg text-xs font-bold hover:bg-red-100 border border-red-200 flex items-center gap-1"><ArrowDown size={14}/> Registrar Salida/Gasto</button>
+                                <button onClick={() => { setTransactionType('Income'); setCategoryInput('Other'); setAmountInput(''); setIsTransactionModalOpen(true); }} className="px-4 py-2 bg-green-50 text-green-700 rounded-lg text-xs font-bold hover:bg-green-100 border border-green-200 flex items-center gap-1"><Plus size={14}/> Registrar Entrada</button>
+                                <button onClick={() => { setTransactionType('Expense'); setCategoryInput('Other'); setAmountInput(''); setIsTransactionModalOpen(true); }} className="px-4 py-2 bg-red-50 text-red-700 rounded-lg text-xs font-bold hover:bg-red-100 border border-red-200 flex items-center gap-1"><ArrowDown size={14}/> Registrar Salida/Gasto</button>
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2">
@@ -228,7 +277,7 @@ export const Finance = () => {
                                         </div>
                                     </div>
                                     <span className={`font-bold ${t.type === 'Income' ? 'text-green-600' : 'text-red-600'}`}>
-                                        {t.type === 'Income' ? '+' : '-'} Bs. {t.amount}
+                                        {t.type === 'Income' ? '+' : '-'} Bs. {Number(t.amount).toFixed(2)}
                                     </span>
                                 </div>
                             ))}
@@ -308,7 +357,7 @@ export const Finance = () => {
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto Inicial (Bs)</label>
-                                    <input autoFocus type="number" className="w-full text-center text-3xl font-bold border-b-2 border-gray-200 focus:border-green-500 outline-none py-2 text-gray-900" value={amountInput || ''} onChange={e => setAmountInput(Number(e.target.value))} placeholder="0.00" />
+                                    <input autoFocus type="number" className="w-full text-center text-3xl font-bold border-b-2 border-gray-200 focus:border-green-500 outline-none py-2 text-gray-900" value={amountInput} onChange={e => setAmountInput(e.target.value)} placeholder="0.00" />
                                 </div>
                                 <button onClick={handleOpenShift} className="w-full py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg">Abrir Turno</button>
                             </div>
@@ -320,11 +369,11 @@ export const Finance = () => {
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Conteo Físico Real (Bs)</label>
-                                    <input autoFocus type="number" className="w-full text-center text-3xl font-bold border-b-2 border-gray-200 focus:border-brand-900 outline-none py-2 text-gray-900" value={finalCashCount || ''} onChange={e => setFinalCashCount(Number(e.target.value))} placeholder="0.00" />
+                                    <input autoFocus type="number" className="w-full text-center text-3xl font-bold border-b-2 border-gray-200 focus:border-brand-900 outline-none py-2 text-gray-900" value={finalCashCount} onChange={e => setFinalCashCount(e.target.value)} placeholder="0.00" />
                                 </div>
-                                {finalCashCount > 0 && (
-                                    <div className={`text-center text-sm font-bold ${Math.abs(finalCashCount - currentBalance) < 0.5 ? 'text-green-600' : 'text-red-500'}`}>
-                                        Diferencia: {(finalCashCount - currentBalance).toFixed(2)}
+                                {(Number(finalCashCount) > 0) && (
+                                    <div className={`text-center text-sm font-bold ${Math.abs(Number(finalCashCount) - currentBalance) < 0.5 ? 'text-green-600' : 'text-red-500'}`}>
+                                        Diferencia: {(Number(finalCashCount) - currentBalance).toFixed(2)}
                                     </div>
                                 )}
                                 <button onClick={handleCloseShift} className="w-full py-3 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 shadow-lg mt-2">Finalizar Turno</button>
@@ -346,7 +395,7 @@ export const Finance = () => {
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Monto (Bs)</label>
-                                <input autoFocus type="number" className="w-full text-3xl font-bold border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-900 outline-none text-gray-900" value={amountInput || ''} onChange={e => setAmountInput(Number(e.target.value))} placeholder="0.00" />
+                                <input autoFocus type="number" className="w-full text-3xl font-bold border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-900 outline-none text-gray-900" value={amountInput} onChange={e => setAmountInput(e.target.value)} placeholder="0.00" />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Descripción / Motivo</label>

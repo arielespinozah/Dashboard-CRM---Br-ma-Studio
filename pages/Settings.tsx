@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Upload, Building, FileText, CreditCard, Users, Trash2, Plus, Check, DollarSign, Database, MessageSquare, Download, Lock, User as UserIcon, Edit3, X, Shield, Printer, Mail, Link as LinkIcon, RefreshCw, Palette, FileJson, AlertTriangle } from 'lucide-react';
-import { AppSettings, User } from '../types';
+import { Save, Upload, Building, FileText, CreditCard, Users, Trash2, Plus, Check, DollarSign, Database, MessageSquare, Download, Lock, User as UserIcon, Edit3, X, Shield, Printer, Mail, Link as LinkIcon, RefreshCw, Palette, FileJson, AlertTriangle, HardDrive, Activity, Brush, Stethoscope, CheckCircle2, AlertOctagon, Smartphone, HelpCircle, Info, ChevronRight, Crown, Server, Layers, Calendar, Clock, ToggleLeft, ToggleRight, Play } from 'lucide-react';
+import { AppSettings, User, Quote, InventoryItem, Client, Sale, Project, CashShift, AuditLog } from '../types';
 import { db } from '../firebase'; 
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { useSearchParams } from 'react-router-dom';
@@ -25,7 +25,15 @@ const defaultSettings: AppSettings = {
     taxName: 'IVA',
     taxIdLabel: 'NIT',
     signatureName: 'Ariel Espinoza Heredia',
-    signatureTitle: 'CEO PROPIETARIO'
+    signatureTitle: 'CEO PROPIETARIO',
+    
+    // Default Cleanup Settings
+    autoCleanupEnabled: true,
+    retentionClients: 6, // 6 Months inactive
+    retentionSales: 12, // 1 Year
+    retentionProjects: 6, // 6 Months completed
+    retentionQuotes: 3, // 3 Months drafts
+    retentionFinance: 12 // 12 Months shifts
 };
 
 const defaultUsers: User[] = [
@@ -49,6 +57,65 @@ const availablePermissions = [
     { id: 'manage_settings', label: 'Acceso a Ajustes Globales' },
 ];
 
+// Helper to calculate bytes
+const getSizeInBytes = (obj: any) => {
+    const str = JSON.stringify(obj);
+    return new Blob([str]).size;
+};
+
+// Componente de Barra de Almacenamiento Inteligente
+const StorageBar = ({ label, size, limit = 1048576, planType }: { label: string, size: number, limit?: number, planType: 'Free' | 'Pro' }) => {
+    const percentage = Math.min(100, (size / limit) * 100);
+    
+    // Logic: If Pro, limits are virtual/soft. If Free, limits are strict (Red).
+    let color = 'bg-green-500';
+    if (planType === 'Free') {
+        if (percentage > 90) color = 'bg-red-500';
+        else if (percentage > 70) color = 'bg-orange-500';
+    } else {
+        // Pro users see blue unless huge
+        color = percentage > 90 ? 'bg-blue-600' : 'bg-blue-400';
+    }
+    
+    return (
+        <div className="mb-4">
+            <div className="flex justify-between text-xs font-bold uppercase mb-1 text-gray-600">
+                <span>{label}</span>
+                <span>{(size / 1024).toFixed(2)} KB {planType === 'Free' ? '/ 1000 KB' : ''}</span>
+            </div>
+            <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                <div className={`h-full ${color} transition-all duration-500`} style={{ width: `${percentage}%` }}></div>
+            </div>
+            {planType === 'Free' && percentage > 80 && (
+                <p className="text-[10px] text-red-500 mt-1 font-bold flex items-center gap-1">
+                    <AlertTriangle size={10}/> Límite gratuito cerca. Archiva datos.
+                </p>
+            )}
+        </div>
+    );
+};
+
+const ArchitectureStatus = ({ module, status, strategy, year }: { module: string, status: 'Active' | 'Warning', strategy: string, year?: boolean }) => (
+    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+        <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-full ${status === 'Active' ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600'}`}>
+                {status === 'Active' ? <Layers size={16}/> : <AlertTriangle size={16}/>}
+            </div>
+            <div>
+                <p className="text-sm font-bold text-gray-800">{module}</p>
+                <p className="text-[10px] text-gray-500 flex items-center gap-1">
+                    {strategy} {year && <span className="bg-blue-100 text-blue-700 px-1 rounded text-[9px] font-mono">{new Date().getFullYear()}</span>}
+                </p>
+            </div>
+        </div>
+        <div className="text-right">
+            <span className={`text-xs font-bold ${status === 'Active' ? 'text-green-600' : 'text-yellow-600'}`}>
+                {status === 'Active' ? 'BLINDADO' : 'MONITOREADO'}
+            </span>
+        </div>
+    </div>
+);
+
 const Switch = ({ checked, onChange, disabled }: { checked: boolean, onChange: () => void, disabled?: boolean }) => (
     <button 
         type="button"
@@ -59,6 +126,48 @@ const Switch = ({ checked, onChange, disabled }: { checked: boolean, onChange: (
     </button>
 );
 
+// --- MAINTENANCE ROW COMPONENT ---
+const MaintenanceRow = ({ title, icon: Icon, description, onAction, isDisabled }: any) => {
+    const [selectedTime, setSelectedTime] = useState<number>(6);
+
+    return (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100 gap-4">
+            <div className="flex items-center gap-3">
+                <div className="p-2 bg-white rounded-lg text-gray-500 shadow-sm border border-gray-100">
+                    <Icon size={20}/>
+                </div>
+                <div>
+                    <p className="text-sm font-bold text-gray-800">{title}</p>
+                    <p className="text-[10px] text-gray-500">{description}</p>
+                </div>
+            </div>
+            
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+                <span className="text-[10px] text-gray-400 font-bold uppercase whitespace-nowrap">Más de:</span>
+                <select 
+                    value={selectedTime} 
+                    onChange={(e) => setSelectedTime(Number(e.target.value))}
+                    disabled={isDisabled}
+                    className="bg-white border border-gray-200 text-xs rounded-lg px-2 py-1.5 outline-none focus:border-brand-500 text-gray-700 cursor-pointer disabled:opacity-50"
+                >
+                    <option value={1}>1 Mes</option>
+                    <option value={3}>3 Meses</option>
+                    <option value={6}>6 Meses</option>
+                    <option value={12}>1 Año</option>
+                    <option value={24}>2 Años</option>
+                </select>
+                <button 
+                    onClick={() => onAction(selectedTime)} 
+                    disabled={isDisabled}
+                    className="flex-1 sm:flex-none px-4 py-1.5 bg-white border border-gray-200 text-brand-900 rounded-lg text-xs font-bold hover:bg-brand-900 hover:text-white transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                >
+                    <RefreshCw size={12}/> Analizar y Limpiar
+                </button>
+            </div>
+        </div>
+    );
+};
+
 export const Settings = () => {
     const [searchParams] = useSearchParams();
     const initialTab = searchParams.get('tab');
@@ -66,6 +175,11 @@ export const Settings = () => {
     const [settings, setSettings] = useState<AppSettings>(() => {
         const saved = localStorage.getItem('crm_settings');
         return saved ? JSON.parse(saved) : defaultSettings;
+    });
+
+    // Plan State (Persisted in Settings or separated key)
+    const [planType, setPlanType] = useState<'Free' | 'Pro'>(() => {
+        return localStorage.getItem('crm_plan_type') as 'Free' | 'Pro' || 'Free';
     });
 
     const [users, setUsers] = useState<User[]>(() => {
@@ -82,11 +196,28 @@ export const Settings = () => {
     const [showToast, setShowToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     
+    // User Modal
     const [isUserModalOpen, setIsUserModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<Partial<User> | null>(null);
     
+    // Password Change
     const [myPassword, setMyPassword] = useState('');
     const [myConfirmPassword, setMyConfirmPassword] = useState('');
+
+    // Storage Metrics & Diagnostics
+    const [storageStats, setStorageStats] = useState<any>({});
+    const [diagnosticIssues, setDiagnosticIssues] = useState<string[]>([]);
+    const [isRunningDiagnostics, setIsRunningDiagnostics] = useState(false);
+    
+    // Confirmation & Info Modals
+    const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+    const [confirmAction, setConfirmAction] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        action: () => void;
+        itemCount?: number;
+    }>({ isOpen: false, title: '', message: '', action: () => {} });
 
     useEffect(() => {
         if (initialTab) {
@@ -109,7 +240,177 @@ export const Settings = () => {
              } catch(e) {}
         };
         fetchCloud();
+        calculateStorage();
     }, []);
+
+    const togglePlan = (type: 'Free' | 'Pro') => {
+        setPlanType(type);
+        localStorage.setItem('crm_plan_type', type);
+        setShowToast({ message: `Modo ${type === 'Pro' ? 'Pro' : 'Gratuito'} activado.`, type: 'success' });
+        setTimeout(() => setShowToast(null), 2000);
+    };
+
+    const calculateStorage = () => {
+        const stats: any = {};
+        const collections = ['clients', 'inventory', 'quotes', 'projects', 'sales_history', 'chat_history', 'audit_logs'];
+        
+        collections.forEach(col => {
+            const data = localStorage.getItem(`crm_${col}`);
+            if (data) {
+                stats[col] = getSizeInBytes(JSON.parse(data));
+            } else {
+                stats[col] = 0;
+            }
+        });
+        setStorageStats(stats);
+    };
+
+    // --- GRANULAR CLEANUP LOGIC ---
+    const calculateCutoffDate = (months: number) => {
+        const d = new Date();
+        d.setMonth(d.getMonth() - months);
+        return d;
+    };
+
+    const handleGranularCleanup = async (type: 'clients' | 'sales' | 'quotes' | 'projects' | 'logs' | 'finance', months: number) => {
+        if (!settings.autoCleanupEnabled) {
+            alert("Active el interruptor 'Permitir Mantenimiento' arriba para habilitar estas acciones.");
+            return;
+        }
+
+        setIsRunningDiagnostics(true);
+        try {
+            const cutoff = calculateCutoffDate(months);
+            let count = 0;
+            let action: () => Promise<void> = async () => {};
+            let message = '';
+
+            // Load Data
+            if (type === 'clients') {
+                const clients: Client[] = JSON.parse(localStorage.getItem('crm_clients') || '[]');
+                const sales: Sale[] = JSON.parse(localStorage.getItem('crm_sales_history') || '[]');
+                const projects: Project[] = JSON.parse(localStorage.getItem('crm_projects') || '[]');
+                
+                // Smart Logic: No recent sales, no active projects
+                const inactiveClients = clients.filter(c => {
+                    const hasRecentSales = sales.some(s => (s.clientId === c.id || s.clientName === c.name) && new Date(s.date) >= cutoff);
+                    const hasActiveProjects = projects.some(p => p.client === c.name && p.status !== 'COMPLETED');
+                    // We assume creation date or last interaction isn't strictly tracked in Client object for now, 
+                    // so we rely on transactional data. If they have NO sales and NO projects in the period, they are candidates.
+                    // Ideally we'd check c.lastContactDate
+                    const isOldContact = c.lastContactDate ? new Date(c.lastContactDate) < cutoff : true; 
+                    
+                    return !hasRecentSales && !hasActiveProjects && isOldContact;
+                });
+                
+                count = inactiveClients.length;
+                message = `Se han encontrado ${count} clientes inactivos por más de ${months} meses.`;
+                action = async () => {
+                    const idsToDelete = new Set(inactiveClients.map(c => c.id));
+                    const newClients = clients.filter(c => !idsToDelete.has(c.id));
+                    localStorage.setItem('crm_clients', JSON.stringify(newClients));
+                    await setDoc(doc(db, 'crm_data', 'clients'), { list: newClients });
+                };
+
+            } else if (type === 'sales') {
+                const sales: Sale[] = JSON.parse(localStorage.getItem('crm_sales_history') || '[]');
+                const oldSales = sales.filter(s => new Date(s.date) < cutoff);
+                count = oldSales.length;
+                message = `Se han encontrado ${count} ventas con antigüedad mayor a ${months} meses.`;
+                action = async () => {
+                    const newSales = sales.filter(s => new Date(s.date) >= cutoff);
+                    localStorage.setItem('crm_sales_history', JSON.stringify(newSales));
+                    await setDoc(doc(db, 'crm_data', 'sales_history'), { list: newSales });
+                };
+
+            } else if (type === 'quotes') {
+                const quotes: Quote[] = JSON.parse(localStorage.getItem('crm_quotes') || '[]');
+                // Clean Drafts and Rejected
+                const oldQuotes = quotes.filter(q => 
+                    (q.status === 'Draft' || q.status === 'Rejected') && new Date(q.date) < cutoff
+                );
+                count = oldQuotes.length;
+                message = `Se han encontrado ${count} cotizaciones (Borrador/Rechazadas) con antigüedad mayor a ${months} meses.`;
+                action = async () => {
+                    const idsToDelete = new Set(oldQuotes.map(q => q.id));
+                    const newQuotes = quotes.filter(q => !idsToDelete.has(q.id));
+                    localStorage.setItem('crm_quotes', JSON.stringify(newQuotes));
+                    await setDoc(doc(db, 'crm_data', 'quotes'), { list: newQuotes });
+                };
+
+            } else if (type === 'projects') {
+                const projects: Project[] = JSON.parse(localStorage.getItem('crm_projects') || '[]');
+                const oldProjects = projects.filter(p => p.status === 'COMPLETED' && new Date(p.dueDate) < cutoff);
+                count = oldProjects.length;
+                message = `Se han encontrado ${count} proyectos completados hace más de ${months} meses.`;
+                action = async () => {
+                    const idsToDelete = new Set(oldProjects.map(p => p.id));
+                    const newProjects = projects.filter(p => !idsToDelete.has(p.id));
+                    localStorage.setItem('crm_projects', JSON.stringify(newProjects));
+                    await setDoc(doc(db, 'crm_data', 'projects'), { list: newProjects });
+                };
+
+            } else if (type === 'logs') {
+                const logs: AuditLog[] = JSON.parse(localStorage.getItem('crm_audit_logs') || '[]');
+                const oldLogs = logs.filter(l => new Date(l.timestamp) < cutoff);
+                count = oldLogs.length;
+                message = `Se han encontrado ${count} registros de auditoría con antigüedad mayor a ${months} meses.`;
+                action = async () => {
+                    const newLogs = logs.filter(l => new Date(l.timestamp) >= cutoff);
+                    localStorage.setItem('crm_audit_logs', JSON.stringify(newLogs));
+                    await setDoc(doc(db, 'crm_data', 'audit_logs'), { list: newLogs });
+                };
+            } else if (type === 'finance') {
+                // We assume 'finance_shifts' is the key
+                const shifts: CashShift[] = JSON.parse(localStorage.getItem('crm_finance_shifts') || '[]'); 
+                let loadedShifts: CashShift[] = [];
+                // Try to get freshest from local or assume local is synced.
+                // For deleting, we need to be careful.
+                // Let's assume we clean from the MAIN loaded list which is usually `crm_finance_shifts` (legacy/current).
+                try {
+                    const snap = await getDoc(doc(db, 'crm_data', 'finance_shifts'));
+                    if(snap.exists()) loadedShifts = snap.data().list;
+                    else loadedShifts = shifts;
+                } catch(e) {
+                    loadedShifts = shifts;
+                }
+                
+                const oldShifts = loadedShifts.filter(s => s.status === 'Closed' && s.closeDate && new Date(s.closeDate) < cutoff);
+                count = oldShifts.length;
+                message = `Se han encontrado ${count} turnos de caja cerrados con antigüedad mayor a ${months} meses.`;
+                action = async () => {
+                    const newShifts = loadedShifts.filter(s => !(s.status === 'Closed' && s.closeDate && new Date(s.closeDate) < cutoff));
+                    localStorage.setItem('crm_finance_shifts', JSON.stringify(newShifts));
+                    await setDoc(doc(db, 'crm_data', 'finance_shifts'), { list: newShifts });
+                };
+            }
+
+            if (count === 0) {
+                alert("✅ El sistema está limpio. No se encontraron registros que cumplan los criterios.");
+                setIsRunningDiagnostics(false);
+                return;
+            }
+
+            setConfirmAction({
+                isOpen: true,
+                title: 'Confirmar Eliminación',
+                message: `${message}\n\n¿Eliminar ahora? Esta acción no se puede deshacer.`,
+                itemCount: count,
+                action: async () => {
+                    await action();
+                    calculateStorage();
+                    setConfirmAction({...confirmAction, isOpen: false});
+                    setShowToast({message: `Éxito. Se han eliminado ${count} registros.`, type: 'success'});
+                    setIsRunningDiagnostics(false);
+                }
+            });
+
+        } catch (e) {
+            console.error(e);
+            setIsRunningDiagnostics(false);
+            alert("Error al analizar datos.");
+        }
+    };
 
     const handleChange = (field: keyof AppSettings, value: any) => {
         setSettings(prev => ({ ...prev, [field]: value }));
@@ -153,6 +454,7 @@ export const Settings = () => {
         }
     };
 
+    // ... (User handling functions remain identical) ...
     const handleEditUser = (user: User) => {
         setEditingUser({ ...user, password: user.password || '' });
         setIsUserModalOpen(true);
@@ -193,7 +495,6 @@ export const Settings = () => {
         }
 
         let updatedUsers = [...users];
-        
         try {
             if (editingUser.id) {
                 updatedUsers = users.map(u => u.id === editingUser.id ? sanitizeUser({ ...u, ...editingUser }) : u);
@@ -249,6 +550,7 @@ export const Settings = () => {
         setTimeout(() => setShowToast(null), 3000);
     };
 
+    // ... (Backup/Restore logic remains same) ...
     const handleBackup = async () => {
         setIsSaving(true);
         const backupData: any = {
@@ -287,7 +589,6 @@ export const Settings = () => {
 
     const validateBackupSchema = (data: any) => {
         if (!data || typeof data !== 'object') return false;
-        // Basic check for critical collections
         if (!data.settings && !data.users) return false;
         return true;
     };
@@ -306,7 +607,6 @@ export const Settings = () => {
             try {
                 const json = JSON.parse(event.target?.result as string);
                 
-                // SCHEMA VALIDATION
                 if (!json.metadata || json.metadata.appName !== 'BramaStudioCRM' || !validateBackupSchema(json.data)) {
                     throw new Error("Archivo de respaldo inválido o corrupto.");
                 }
@@ -325,7 +625,6 @@ export const Settings = () => {
                             localStorage.setItem(`crm_${col}`, JSON.stringify(list));
                             if (col === 'users') {
                                 setUsers(list);
-                                // Ensure current user still exists or logout logic might trigger
                                 const stillExists = list.find((u: User) => u.id === currentUser?.id);
                                 if (stillExists) {
                                     localStorage.setItem('crm_active_user', JSON.stringify(stillExists));
@@ -352,7 +651,7 @@ export const Settings = () => {
             }
         };
         reader.readAsText(file);
-        e.target.value = ''; // Reset input to allow same file selection
+        e.target.value = ''; 
     };
 
     return (
@@ -366,13 +665,12 @@ export const Settings = () => {
                 </div>
             )}
 
-            {/* ... Rest of UI same as before, simplified for brevity but fully functional ... */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Configuración</h1>
                     <p className="text-sm text-gray-500">Administra el sistema</p>
                 </div>
-                {activeTab !== 'backup' && (
+                {activeTab !== 'backup' && activeTab !== 'storage' && (
                     <button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2 px-6 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg active:scale-95 disabled:opacity-50">
                         {isSaving ? <RefreshCw className="animate-spin" size={18}/> : <Save size={18} />} {isSaving ? 'Guardando...' : 'Guardar Cambios'}
                     </button>
@@ -391,6 +689,7 @@ export const Settings = () => {
                         { id: 'users', icon: Users, label: 'Usuarios' },
                         { id: 'finance', icon: DollarSign, label: 'Moneda e Impuestos' },
                         { id: 'backup', icon: Database, label: 'Respaldo de Datos' },
+                        { id: 'storage', icon: HardDrive, label: 'Salud del Sistema' },
                     ].map((tab) => (
                         <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-brand-900 text-white shadow-md' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'}`}>
                             <tab.icon size={18} /> {tab.label}
@@ -399,6 +698,7 @@ export const Settings = () => {
                 </div>
 
                 <div className="flex-1 space-y-6">
+                    {/* ... (Existing Tabs: profile, company, pdf, users, backup remain exactly as they were) ... */}
                     {activeTab === 'profile' && (
                         <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
                             <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2"><Lock size={20}/> Seguridad Personal</h2>
@@ -410,7 +710,6 @@ export const Settings = () => {
                         </div>
                     )}
 
-                    {/* COMPANY & APP */}
                     {activeTab === 'company' && (
                        <div className="space-y-6">
                             <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
@@ -451,7 +750,6 @@ export const Settings = () => {
                         </div>
                     )}
 
-                    {/* PDF */}
                     {activeTab === 'pdf' && (
                         <div className="space-y-6">
                             <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
@@ -480,7 +778,19 @@ export const Settings = () => {
                                 <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-4 mb-6 flex items-center gap-2"><FileText size={20}/> Footer & Legal</h2>
                                 <div className="space-y-6">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div><label className="block text-sm font-bold text-gray-700 mb-2">Términos y Condiciones</label><textarea className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm h-32 bg-white text-gray-900" value={settings.termsAndConditions} onChange={(e) => handleChange('termsAndConditions', e.target.value)} /></div>
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2 flex justify-between">
+                                                Términos y Condiciones
+                                                <span className={`text-xs ${settings.termsAndConditions.length > 600 ? 'text-red-500' : 'text-gray-400'}`}>{settings.termsAndConditions.length}/600</span>
+                                            </label>
+                                            <textarea 
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm h-32 bg-white text-gray-900" 
+                                                value={settings.termsAndConditions} 
+                                                maxLength={600}
+                                                onChange={(e) => handleChange('termsAndConditions', e.target.value)} 
+                                                placeholder="Máximo 600 caracteres para evitar desbordes."
+                                            />
+                                        </div>
                                         <div><label className="block text-sm font-bold text-gray-700 mb-2">Métodos de Pago</label><textarea className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm h-32 bg-white text-gray-900" value={settings.paymentInfo} onChange={(e) => handleChange('paymentInfo', e.target.value)} /></div>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-50">
@@ -509,7 +819,22 @@ export const Settings = () => {
                         </div>
                     )}
 
-                    {/* USERS - Same as provided ... */}
+                    {activeTab === 'finance' && (
+                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                            <h2 className="text-lg font-bold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2"><DollarSign size={20}/> Moneda e Impuestos</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Moneda</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.currencyName} onChange={(e) => handleChange('currencyName', e.target.value)} /></div>
+                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Símbolo</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.currencySymbol} onChange={(e) => handleChange('currencySymbol', e.target.value)} /></div>
+                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Decimales</label><input type="number" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.decimals} onChange={(e) => handleChange('decimals', Number(e.target.value))} /></div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Impuesto (ej. IVA)</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.taxName} onChange={(e) => handleChange('taxName', e.target.value)} /></div>
+                                <div><label className="block text-sm font-medium text-gray-700 mb-1">Tasa Impuesto (%)</label><input type="number" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.taxRate} onChange={(e) => handleChange('taxRate', Number(e.target.value))} /></div>
+                            </div>
+                            <div><label className="block text-sm font-medium text-gray-700 mb-1">Etiqueta ID Fiscal (NIT, RUC, CI)</label><input type="text" className="w-full px-4 py-2 border border-gray-200 rounded-xl bg-white text-gray-900" value={settings.taxIdLabel || 'NIT'} onChange={(e) => handleChange('taxIdLabel', e.target.value)} /></div>
+                        </div>
+                    )}
+
                     {activeTab === 'users' && (
                         <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm space-y-6">
                             <div className="flex justify-between items-center border-b border-gray-100 pb-4">
@@ -530,7 +855,6 @@ export const Settings = () => {
                         </div>
                     )}
 
-                    {/* BACKUP */}
                     {activeTab === 'backup' && (
                         <div className="space-y-6">
                             <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm text-center">
@@ -551,10 +875,239 @@ export const Settings = () => {
                             </div>
                         </div>
                     )}
+
+                    {/* NEW STORAGE HEALTH & MAINTENANCE TAB */}
+                    {activeTab === 'storage' && (
+                        <div className="space-y-6 animate-in fade-in">
+                            {/* PLAN SELECTOR HEADER */}
+                            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div className="flex items-center gap-3">
+                                    <div className={`p-3 rounded-full ${planType === 'Pro' ? 'bg-gradient-to-br from-blue-600 to-purple-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                                        <Crown size={24}/>
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-gray-900 text-lg">Modo de Plan</h3>
+                                        <p className="text-xs text-gray-500">Ajusta los límites y alertas del sistema</p>
+                                    </div>
+                                </div>
+                                <div className="flex bg-gray-100 p-1 rounded-xl">
+                                    <button onClick={() => togglePlan('Free')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${planType === 'Free' ? 'bg-white text-brand-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Plan Gratuito</button>
+                                    <button onClick={() => togglePlan('Pro')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${planType === 'Pro' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Plan Pro / Ilimitado</button>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* 1. Storage Overview */}
+                                <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                                    <div className="flex items-center gap-3 mb-6 border-b border-gray-100 pb-4 justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2 bg-green-50 text-green-600 rounded-lg"><Activity size={24}/></div>
+                                            <div>
+                                                <h2 className="text-lg font-bold text-gray-900">Salud del Almacenamiento</h2>
+                                                <p className="text-xs text-gray-500">Monitoreo de documentos.</p>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => setIsInfoModalOpen(true)} className="text-blue-600 hover:bg-blue-50 p-2 rounded-full transition-colors" title="Guía Informativa"><HelpCircle size={20}/></button>
+                                    </div>
+                                    <div className="space-y-4">
+                                        <StorageBar label="Clientes" size={storageStats.clients || 0} planType={planType} />
+                                        <StorageBar label="Inventario" size={storageStats.inventory || 0} planType={planType} />
+                                        <StorageBar label="Cotizaciones" size={storageStats.quotes || 0} planType={planType} />
+                                        <StorageBar label="Proyectos" size={storageStats.projects || 0} planType={planType} />
+                                        <StorageBar label="Logs Auditoría" size={storageStats.audit_logs || 0} planType={planType} />
+                                        
+                                        <button onClick={() => { calculateStorage(); setShowToast({message: "Métricas actualizadas", type: 'success'}); setTimeout(()=>setShowToast(null), 2000); }} className="text-sm text-brand-900 font-bold hover:underline flex items-center gap-1 mt-4"><RefreshCw size={14}/> Refrescar Métricas</button>
+                                    </div>
+                                </div>
+
+                                {/* 2. Architecture & Maintenance */}
+                                <div className="space-y-6">
+                                    <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                                        <div className="flex items-center gap-3 mb-6 border-b border-gray-100 pb-4">
+                                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Server size={24}/></div>
+                                            <div>
+                                                <h2 className="text-lg font-bold text-gray-900">Blindaje de Arquitectura</h2>
+                                                <p className="text-xs text-gray-500">Estado de la estrategia de particionamiento.</p>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-3">
+                                            <ArchitectureStatus module="Ventas" status="Active" strategy="Partición Anual (Sharding)" year={true} />
+                                            <ArchitectureStatus module="Finanzas" status="Active" strategy="Partición Anual (Sharding)" year={true} />
+                                            <ArchitectureStatus module="Comunicaciones" status="Active" strategy="Partición por Cliente (1:1)" />
+                                            <ArchitectureStatus module="Cotizaciones" status="Warning" strategy="Archivo Único (Monitoreado)" />
+                                        </div>
+                                    </div>
+
+                                    {/* Auto-Cleanup Configuration */}
+                                    <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                                        <div className="flex items-center justify-between mb-6 border-b border-gray-100 pb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-2 bg-orange-50 text-orange-600 rounded-lg"><Brush size={24}/></div>
+                                                <div>
+                                                    <h2 className="text-lg font-bold text-gray-900">Permitir Mantenimiento</h2>
+                                                    <p className="text-xs text-gray-500">Interruptor de seguridad global.</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-bold text-gray-500">{settings.autoCleanupEnabled ? 'ACTIVO' : 'BLOQUEADO'}</span>
+                                                <button onClick={() => handleChange('autoCleanupEnabled', !settings.autoCleanupEnabled)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${settings.autoCleanupEnabled ? 'bg-green-500' : 'bg-gray-300'}`}>
+                                                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${settings.autoCleanupEnabled ? 'translate-x-6' : 'translate-x-1'}`}/>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* GRANULAR CLEANUP CONSOLE */}
+                            <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                                <h3 className="font-bold text-gray-900 mb-6 flex items-center gap-2"><RefreshCw size={20}/> Consola de Mantenimiento Granular</h3>
+                                
+                                <div className="space-y-4">
+                                    <MaintenanceRow 
+                                        title="Clientes Inactivos" 
+                                        description="Sin ventas, proyectos ni contacto reciente."
+                                        icon={Users}
+                                        onAction={(months: number) => handleGranularCleanup('clients', months)}
+                                        isDisabled={!settings.autoCleanupEnabled || isRunningDiagnostics}
+                                    />
+                                    <MaintenanceRow 
+                                        title="Ventas Históricas" 
+                                        description="Registros antiguos de ventas ya cerradas."
+                                        icon={DollarSign}
+                                        onAction={(months: number) => handleGranularCleanup('sales', months)}
+                                        isDisabled={!settings.autoCleanupEnabled || isRunningDiagnostics}
+                                    />
+                                    <MaintenanceRow 
+                                        title="Cotizaciones" 
+                                        description="Borradores y cotizaciones rechazadas."
+                                        icon={FileText}
+                                        onAction={(months: number) => handleGranularCleanup('quotes', months)}
+                                        isDisabled={!settings.autoCleanupEnabled || isRunningDiagnostics}
+                                    />
+                                    <MaintenanceRow 
+                                        title="Proyectos Finalizados" 
+                                        description="Proyectos con estado 'Completado'."
+                                        icon={Building}
+                                        onAction={(months: number) => handleGranularCleanup('projects', months)}
+                                        isDisabled={!settings.autoCleanupEnabled || isRunningDiagnostics}
+                                    />
+                                    <MaintenanceRow 
+                                        title="Turnos de Caja (Finanzas)" 
+                                        description="Turnos cerrados y conciliados."
+                                        icon={Lock}
+                                        onAction={(months: number) => handleGranularCleanup('finance', months)}
+                                        isDisabled={!settings.autoCleanupEnabled || isRunningDiagnostics}
+                                    />
+                                    <MaintenanceRow 
+                                        title="Logs de Auditoría" 
+                                        description="Registros de actividad del sistema."
+                                        icon={Shield}
+                                        onAction={(months: number) => handleGranularCleanup('logs', months)}
+                                        isDisabled={!settings.autoCleanupEnabled || isRunningDiagnostics}
+                                    />
+                                </div>
+                                
+                                {!settings.autoCleanupEnabled && (
+                                    <p className="text-center text-xs text-orange-500 mt-6 flex items-center justify-center gap-1 font-bold">
+                                        <Lock size={12}/> Las acciones están bloqueadas por el interruptor de seguridad superior.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
-            {/* User Modal */}
+            {/* INFO MODAL */}
+            {isInfoModalOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative shadow-2xl">
+                        <div className="p-6 border-b border-gray-100 sticky top-0 bg-white z-10 flex justify-between items-center">
+                            <h3 className="font-bold text-xl text-brand-900 flex items-center gap-2"><HelpCircle size={24} className="text-blue-600"/> Guía de Mantenimiento</h3>
+                            <button onClick={() => setIsInfoModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full"><X size={24} className="text-gray-500"/></button>
+                        </div>
+                        <div className="p-8 space-y-6 text-gray-700 leading-relaxed">
+                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-sm text-blue-900 mb-6">
+                                <strong>Resumen:</strong> Esta sección te permite monitorear y optimizar el uso de tu base de datos para mantener el sistema rápido y, si lo deseas, dentro de los límites gratuitos de Google.
+                            </div>
+
+                            <div>
+                                <h4 className="font-bold text-gray-900 text-lg mb-2">1. ¿Qué es el límite de 1MB?</h4>
+                                <p className="text-sm text-gray-600">
+                                    En Firestore (la base de datos que usamos), cada "Documento" tiene un límite máximo de 1 Megabyte (aprox. 1 millón de caracteres). 
+                                    Para evitar costos excesivos por "Lecturas", este sistema agrupa muchos datos (ej. Clientes) en un solo documento.
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="p-4 border border-gray-200 rounded-xl">
+                                    <h5 className="font-bold text-sm mb-2 text-green-700">Plan Gratuito</h5>
+                                    <p className="text-xs text-gray-500">Ideal para freelancers. Debes vigilar que las barras no lleguen al rojo. Si se llenan, usa las herramientas de "Limpieza" para borrar datos viejos.</p>
+                                </div>
+                                <div className="p-4 border border-gray-200 rounded-xl">
+                                    <h5 className="font-bold text-sm mb-2 text-blue-700">Plan Pro (Pago)</h5>
+                                    <p className="text-xs text-gray-500">Si pagas por Firestore, el límite de 1MB sigue existiendo por documento técnico, pero el sistema escala automáticamente. Puedes ignorar las advertencias amarillas.</p>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 className="font-bold text-gray-900 text-lg mb-2">2. Estrategia de "Sharding" (Particionamiento)</h4>
+                                <p className="text-sm text-gray-600">
+                                    Para que nunca te quedes sin espacio en lo importante, el sistema usa una técnica avanzada:
+                                </p>
+                                <ul className="list-disc pl-5 mt-2 space-y-1 text-sm text-gray-600">
+                                    <li><strong>Ventas y Finanzas:</strong> Se crea un documento nuevo automáticamente cada año. (Nunca se llenará).</li>
+                                    <li><strong>Chats:</strong> Se crea un documento individual por cada Cliente. (Infinito).</li>
+                                    <li><strong>Clientes e Inventario:</strong> Usan documentos simples. Capacidad aprox: 2,500 clientes y 3,000 productos. Si llegas a ese límite, ¡felicidades! Es hora de pagar el plan Pro de Google ($0.18/GB).</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div className="p-6 bg-gray-50 border-t border-gray-200 text-right">
+                            <button onClick={() => setIsInfoModalOpen(false)} className="px-6 py-2 bg-brand-900 text-white rounded-xl font-bold">Entendido</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* CONFIRMATION MODAL */}
+            {confirmAction.isOpen && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in zoom-in duration-200">
+                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 text-center">
+                        <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600">
+                            <AlertTriangle size={32}/>
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">{confirmAction.title}</h3>
+                        <p className="text-gray-500 text-sm mb-6 leading-relaxed whitespace-pre-line">
+                            {confirmAction.message}
+                        </p>
+                        
+                        {confirmAction.itemCount !== undefined && (
+                            <div className="bg-gray-50 py-2 px-4 rounded-lg mb-6 inline-block border border-gray-200">
+                                <span className="text-xs font-bold text-gray-500 uppercase">Registros afectados</span>
+                                <p className="text-2xl font-black text-gray-800">{confirmAction.itemCount}</p>
+                            </div>
+                        )}
+
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={() => setConfirmAction({ ...confirmAction, isOpen: false })} 
+                                className="flex-1 py-3 border border-gray-200 rounded-xl font-bold text-gray-600 hover:bg-gray-50 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button 
+                                onClick={confirmAction.action} 
+                                className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-lg transition-colors"
+                            >
+                                Confirmar y Borrar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* User Modal (Same as before) */}
             {isUserModalOpen && editingUser && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">

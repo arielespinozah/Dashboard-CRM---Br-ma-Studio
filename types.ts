@@ -153,6 +153,14 @@ export interface AppSettings {
   taxRate: number;
   taxName: string;
   taxIdLabel?: string; // Custom label for NIT/RUC/CI
+
+  // Maintenance & Auto-Cleanup Settings
+  autoCleanupEnabled?: boolean; // Master switch
+  retentionClients?: number; // Months to keep inactive clients
+  retentionSales?: number; // Months to keep sales history
+  retentionProjects?: number; // Months to keep completed projects
+  retentionQuotes?: number; // Months to keep draft quotes
+  retentionFinance?: number; // Months to keep closed shifts
 }
 
 export interface User {

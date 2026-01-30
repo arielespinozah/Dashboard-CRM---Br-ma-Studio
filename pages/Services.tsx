@@ -243,25 +243,25 @@ export const Services = () => {
   return (
     <div className="space-y-6 h-full flex flex-col relative pb-safe-area">
        {/* Header */}
-       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+       <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Catálogo</h1>
-          <p className="text-sm text-gray-500">Administra y comparte tus servicios y productos</p>
+          <p className="text-sm text-gray-500">Administra y comparte</p>
         </div>
-        <div className="flex flex-wrap gap-2 items-center">
-            {!isLoaded && <span className="text-xs text-brand-900 flex items-center gap-1"><RefreshCw className="animate-spin" size={12}/> Sync</span>}
+        <div className="flex items-center gap-2">
+            {!isLoaded && <span className="text-xs text-brand-900 flex items-center gap-1 hidden sm:flex"><RefreshCw className="animate-spin" size={12}/> Sync</span>}
             
-            <div className="flex bg-gray-100 p-1 rounded-xl mr-1">
+            <div className="flex bg-gray-100 p-1 rounded-xl">
                 <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><LayoutGrid size={18}/></button>
                 <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><ListIcon size={18}/></button>
             </div>
 
-            <button onClick={() => setIsCategoryModalOpen(true)} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+            <button onClick={() => setIsCategoryModalOpen(true)} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors hidden sm:flex">
                 <Grid size={16} /> <span className="hidden sm:inline">Categorías</span>
             </button>
             {canManage && (
                 <button onClick={openNew} disabled={!isLoaded} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg transition-all active:scale-95 disabled:opacity-50">
-                    <Plus size={16} /> Nuevo
+                    <Plus size={18} /> <span className="hidden sm:inline">Nuevo</span>
                 </button>
             )}
         </div>

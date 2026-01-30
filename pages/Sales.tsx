@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Plus, Trash2, X, Package, Check, Printer, User, CreditCard, RefreshCw, Edit3, Download, Share2, Copy, Calendar, DollarSign, ChevronRight, Eye, ChevronDown, ShoppingBag, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Trash2, X, Package, Check, Printer, User, CreditCard, RefreshCw, Edit3, Download, Share2, Copy, Calendar, DollarSign, ChevronRight, Eye, ChevronDown, ShoppingBag, AlertCircle, AlertTriangle, FileText } from 'lucide-react';
 import { Sale, QuoteItem, AppSettings, InventoryItem, Client, User as UserType, AuditLog } from '../types';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { db } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { Link } from 'react-router-dom';
 
 const defaultSettings: AppSettings = {
     companyName: 'Bráma Studio',
@@ -28,11 +29,13 @@ const defaultSettings: AppSettings = {
 };
 
 const formatCurrency = (amount: number, settings: AppSettings) => {
-    const val = amount.toLocaleString(undefined, { minimumFractionDigits: settings.decimals, maximumFractionDigits: settings.decimals });
+    const safeAmount = Number(amount) || 0;
+    const val = safeAmount.toLocaleString(undefined, { minimumFractionDigits: settings.decimals, maximumFractionDigits: settings.decimals });
     return settings.currencyPosition === 'before' ? `${settings.currencySymbol} ${val}` : `${val} ${settings.currencySymbol}`;
 };
 
 // --- NUMBER TO WORDS CONVERTER (SPANISH) ---
+// (Functions Unidades, Decenas, etc. kept same for brevity, assuming existing logic is fine)
 const Unidades = (num: number) => {
     switch (num) {
         case 1: return "UN";
@@ -145,7 +148,7 @@ const convertNumberToWordsEs = (amount: number, currencyName: string) => {
 };
 // ---------------------------------------------
 
-const logAuditAction = async (action: 'Delete' | 'Update' | 'Create', description: string, user: UserType, metadata?: string) => {
+const logAuditAction = (action: 'Delete' | 'Update' | 'Create', description: string, user: UserType, metadata?: string) => {
     const log: AuditLog = {
         id: Date.now().toString(),
         action,
@@ -162,9 +165,7 @@ const logAuditAction = async (action: 'Delete' | 'Update' | 'Create', descriptio
     const updatedLogs = [log, ...logs];
     localStorage.setItem('crm_audit_logs', JSON.stringify(updatedLogs));
 
-    try {
-        await setDoc(doc(db, 'crm_data', 'audit_logs'), { list: updatedLogs });
-    } catch(e) { console.error("Audit Log Cloud Error", e); }
+    setDoc(doc(db, 'crm_data', 'audit_logs'), { list: updatedLogs }).catch(()=>{});
 };
 
 // Toggle Switch Component for IVA
@@ -176,6 +177,9 @@ const ToggleSwitch = ({ enabled, onChange, label }: { enabled: boolean, onChange
         <span className={`text-sm font-medium transition-colors ${enabled ? 'text-brand-900' : 'text-gray-500'}`}>{label}</span>
     </div>
 );
+
+// --- SCALABILITY HELPER: YEARLY SHARDING ---
+const getSalesDocId = (year: string | number) => `sales_${year}`;
 
 export const Sales = () => {
   const [currentUser, setCurrentUser] = useState<UserType | null>(() => {
@@ -200,6 +204,13 @@ export const Sales = () => {
   const [view, setView] = useState<'list' | 'create'>('list');
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Detail Modal State
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  
+  // Share Modal State
+  const [shareSale, setShareSale] = useState<Sale | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+
   const [modalType, setModalType] = useState<'none' | 'client' | 'catalog' | 'preview'>('none');
   const [modalSearch, setModalSearch] = useState('');
   const [catalogTab, setCatalogTab] = useState<'All' | 'Service' | 'Product'>('All');
@@ -217,6 +228,7 @@ export const Sales = () => {
   const [pdfActionData, setPdfActionData] = useState<{data: Sale, action: 'print'|'download'} | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
+  // Permisos robustos
   const canDelete = currentUser?.role === 'Admin' || currentUser?.permissions?.includes('all') || currentUser?.permissions?.includes('delete_sales');
 
   useEffect(() => {
@@ -225,32 +237,46 @@ export const Sales = () => {
           const s = localStorage.getItem('crm_settings');
           if (s) setSettings({ ...defaultSettings, ...JSON.parse(s) });
 
-          // Initial Local Load
+          // Load local state
           let localClients = localStorage.getItem('crm_clients');
           if (localClients) setAvailableClients(JSON.parse(localClients));
-          
           let localInv = localStorage.getItem('crm_inventory');
           if (localInv) setAvailableInventory(JSON.parse(localInv));
 
           try {
-              // Parallel Cloud Fetch for Freshness
-              const [salesSnap, clientsSnap, invSnap] = await Promise.all([
+              // Parallel Cloud Fetch
+              const currentYear = new Date().getFullYear();
+              const prevYear = currentYear - 1;
+
+              // Architecture Fix: Load 'sales_history' (legacy) + 'sales_2024' + 'sales_2025'
+              const [legacySnap, currentYearSnap, prevYearSnap, clientsSnap, invSnap] = await Promise.all([
                   getDoc(doc(db, 'crm_data', 'sales_history')),
+                  getDoc(doc(db, 'crm_data', getSalesDocId(currentYear))),
+                  getDoc(doc(db, 'crm_data', getSalesDocId(prevYear))),
                   getDoc(doc(db, 'crm_data', 'clients')),
                   getDoc(doc(db, 'crm_data', 'inventory'))
               ]);
 
-              if(salesSnap.exists()) {
-                  setSales(salesSnap.data().list);
-                  localStorage.setItem('crm_sales_history', JSON.stringify(salesSnap.data().list));
-              }
+              let allSalesLoaded: Sale[] = [];
+              if (legacySnap.exists()) allSalesLoaded = [...allSalesLoaded, ...(legacySnap.data().list || [])];
+              if (prevYearSnap.exists()) allSalesLoaded = [...allSalesLoaded, ...(prevYearSnap.data().list || [])];
+              if (currentYearSnap.exists()) allSalesLoaded = [...allSalesLoaded, ...(currentYearSnap.data().list || [])];
+
+              // Dedupe and Sort
+              const uniqueSales = Array.from(new Map(allSalesLoaded.map(item => [item.id, item])).values());
+              // Sort desc
+              uniqueSales.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+              setSales(uniqueSales);
+              localStorage.setItem('crm_sales_history', JSON.stringify(uniqueSales));
+
               if(clientsSnap.exists()) {
-                  setAvailableClients(clientsSnap.data().list);
-                  localStorage.setItem('crm_clients', JSON.stringify(clientsSnap.data().list));
+                  setAvailableClients(clientsSnap.data().list || []);
+                  localStorage.setItem('crm_clients', JSON.stringify(clientsSnap.data().list || []));
               }
               if(invSnap.exists()) {
-                  setAvailableInventory(invSnap.data().list);
-                  localStorage.setItem('crm_inventory', JSON.stringify(invSnap.data().list));
+                  setAvailableInventory(invSnap.data().list || []);
+                  localStorage.setItem('crm_inventory', JSON.stringify(invSnap.data().list || []));
               }
           } catch(e) {
               console.error("Data sync error:", e);
@@ -260,31 +286,37 @@ export const Sales = () => {
       loadData();
   }, []);
 
-  const syncSalesToCloud = async (newSales: Sale[]) => {
-      setSales(newSales);
-      localStorage.setItem('crm_sales_history', JSON.stringify(newSales));
-      try {
-          await setDoc(doc(db, 'crm_data', 'sales_history'), { list: newSales });
-      } catch(e) {
-          console.error("Error syncing sales", e);
-      }
+  // --- SCALABLE SAVE FUNCTION ---
+  const syncSalesToCloud = (updatedAllSales: Sale[]) => {
+      // 1. Update UI & Local
+      setSales(updatedAllSales);
+      localStorage.setItem('crm_sales_history', JSON.stringify(updatedAllSales));
+      
+      // 2. Group by Year
+      const salesByYear: Record<string, Sale[]> = {};
+      
+      updatedAllSales.forEach(sale => {
+          const year = new Date(sale.date).getFullYear();
+          if (!salesByYear[year]) salesByYear[year] = [];
+          salesByYear[year].push(sale);
+      });
+
+      // 3. Fire and Forget Saves per Year Document
+      Object.keys(salesByYear).forEach(year => {
+          const docId = getSalesDocId(year);
+          const yearSales = salesByYear[year];
+          setDoc(doc(db, 'crm_data', docId), { list: yearSales }).catch(e => console.warn(`Cloud sync failed for ${docId}`, e));
+      });
   };
 
   // Recalculate Totals
   useEffect(() => {
       const items = newSale.items || [];
       const sub = items.reduce((acc, item) => acc + item.total, 0);
-      
-      // Discount
       const discountPercentage = newSale.discount || 0;
       const discountAmount = sub * (discountPercentage / 100);
-      
-      // Tax Base
       const taxableAmount = sub - discountAmount;
-      
-      // Tax
       const taxAmount = taxEnabled ? taxableAmount * (settings.taxRate / 100) : 0;
-      
       const total = taxableAmount + taxAmount;
       
       setNewSale(prev => ({ 
@@ -296,7 +328,7 @@ export const Sales = () => {
       }));
   }, [newSale.items, taxEnabled, settings.taxRate, newSale.paymentStatus, newSale.discount]);
 
-  // --- Handlers ---
+  // ... (Handlers for Items, Clients, Inventory - No changes needed here, logic is local) ...
   const handleAddItem = (item: InventoryItem, priceOverride?: number) => {
       const priceToUse = priceOverride !== undefined ? priceOverride : item.price;
       const existingItemIndex = newSale.items?.findIndex(i => i.description === item.name && i.unitPrice === priceToUse);
@@ -352,7 +384,7 @@ export const Sales = () => {
           const updated = [...availableClients, client];
           setAvailableClients(updated);
           localStorage.setItem('crm_clients', JSON.stringify(updated));
-          setDoc(doc(db, 'crm_data', 'clients'), { list: updated });
+          setDoc(doc(db, 'crm_data', 'clients'), { list: updated }).catch(()=>{});
           setNewSale({...newSale, clientName: client.name, clientId: client.id});
           setModalType('none');
           setIsCreatingClient(false);
@@ -362,19 +394,16 @@ export const Sales = () => {
       }
   };
   
-  // --- ROBUST STOCK HANDLING ---
-  const updateInventoryStock = (saleItems: QuoteItem[], reverse: boolean = false) => {
-      const inventoryUpdates = [...availableInventory];
+  const updateInventoryStock = (saleItems: QuoteItem[], inventoryList: InventoryItem[], reverse: boolean = false) => {
+      const inventoryUpdates = [...inventoryList];
       let inventoryChanged = false;
 
       saleItems.forEach(saleItem => {
           const productIndex = inventoryUpdates.findIndex(i => i.name === saleItem.description);
           if (productIndex > -1 && inventoryUpdates[productIndex].type === 'Product') {
-              // If reverse is true, we are adding stock back (Deleting a sale or starting an edit)
               const modifier = reverse ? 1 : -1;
               inventoryUpdates[productIndex].quantity += (saleItem.quantity * modifier);
               
-              // Status Check
               const qty = inventoryUpdates[productIndex].quantity;
               const min = inventoryUpdates[productIndex].minStock || 5;
               
@@ -389,14 +418,16 @@ export const Sales = () => {
       if (inventoryChanged) {
           setAvailableInventory(inventoryUpdates);
           localStorage.setItem('crm_inventory', JSON.stringify(inventoryUpdates));
-          setDoc(doc(db, 'crm_data', 'inventory'), { list: inventoryUpdates }).catch(e => console.error("Inv update fail", e));
+          const cleanInv = JSON.parse(JSON.stringify(inventoryUpdates));
+          setDoc(doc(db, 'crm_data', 'inventory'), { list: cleanInv }).catch(e => console.error("Inv update fail", e));
       }
   };
 
-  const handleFinalizeSale = async () => {
+  const handleFinalizeSale = () => {
       if (!newSale.clientName) { alert('Seleccione un cliente.'); return; }
       if (!newSale.items || newSale.items.length === 0) { alert('Agregue productos.'); return; }
 
+      let currentInventory = availableInventory;
       let saleId = editingId;
       if (!saleId) {
           saleId = `VTA-${new Date().getFullYear()}-${String(sales.length + 1).padStart(4, '0')}`;
@@ -419,17 +450,14 @@ export const Sales = () => {
           notes: ''
       };
       
-      // LOGIC FOR INVENTORY UPDATE
       if (editingId) {
-          // 1. Find Original Sale to restore stock first
           const originalSale = sales.find(s => s.id === editingId);
           if (originalSale) {
-              updateInventoryStock(originalSale.items, true); // Restore old stock
+              updateInventoryStock(originalSale.items, currentInventory, true); 
           }
       }
       
-      // 2. Deduct new stock
-      updateInventoryStock(finalSale.items, false);
+      updateInventoryStock(finalSale.items, currentInventory, false);
 
       let updatedSales = [...sales];
       if (editingId) {
@@ -440,13 +468,18 @@ export const Sales = () => {
           if (currentUser) logAuditAction('Create', `Nueva venta ${finalSale.id}`, currentUser, `Cliente: ${finalSale.clientName}, Total: ${finalSale.total}`);
       }
 
-      syncSalesToCloud(updatedSales);
+      syncSalesToCloud(updatedSales); // Uses Scalable Saver
       setPdfPreview(finalSale);
       setModalType('preview');
       setNewSale({ items: [], amountPaid: 0, subtotal: 0, discount: 0, tax: 0, total: 0, paymentStatus: 'Paid', paymentMethod: 'Cash' });
       setEditingId(null);
       setTaxEnabled(false);
       setView('list');
+      
+      // If editing, return to detail view of the updated sale
+      if (editingId) {
+          setSelectedSale(finalSale);
+      }
   };
 
   const handleEditSale = (sale: Sale, e?: React.MouseEvent) => {
@@ -455,7 +488,7 @@ export const Sales = () => {
       setNewSale({
           clientName: sale.clientName,
           clientId: sale.clientId,
-          items: JSON.parse(JSON.stringify(sale.items)), // Deep copy to prevent ref issues
+          items: JSON.parse(JSON.stringify(sale.items)), 
           paymentMethod: sale.paymentMethod,
           paymentStatus: sale.paymentStatus,
           subtotal: sale.subtotal,
@@ -468,9 +501,21 @@ export const Sales = () => {
       setTaxEnabled(sale.tax > 0);
       setEditingId(sale.id);
       setView('create');
+      setSelectedSale(null); // Close modal
   };
 
-  const handleDeleteSale = async (id: string, e?: React.MouseEvent) => {
+  const handleCancelEdit = () => {
+      // Return to list view
+      setView('list');
+      // If we were editing, restore the detail view
+      if (editingId) {
+          const original = sales.find(s => s.id === editingId);
+          if (original) setSelectedSale(original);
+      }
+  };
+
+  // --- SAFE DELETE HANDLER ---
+  const handleDeleteSale = (id: string, e?: React.MouseEvent) => {
       e?.preventDefault();
       e?.stopPropagation();
       
@@ -479,29 +524,28 @@ export const Sales = () => {
           return;
       }
 
-      if (window.confirm("ADVERTENCIA DE SEGURIDAD: ¿Eliminar este recibo permanentemente? \n\nEl stock de los productos será devuelto al inventario.")) {
-          const saleToDelete = sales.find(s => s.id === id);
-          
-          if (saleToDelete) {
-              // RESTORE INVENTORY
-              updateInventoryStock(saleToDelete.items, true);
+      if (window.confirm("ADVERTENCIA: ¿Eliminar recibo permanentemente? Stock será devuelto.")) {
+          try {
+              const saleToDelete = sales.find(s => s.id === id);
               
-              const updatedSales = sales.filter(s => s.id !== id);
-              setSales(updatedSales);
-              localStorage.setItem('crm_sales_history', JSON.stringify(updatedSales));
-              
-              try {
-                  await setDoc(doc(db, 'crm_data', 'sales_history'), { list: updatedSales });
-                  if (currentUser) {
-                      await logAuditAction('Delete', `Eliminó venta ${id} y restauró stock`, currentUser, `Monto eliminado: ${saleToDelete.total}. Cliente: ${saleToDelete.clientName}`);
-                  }
-              } catch(err) {
-                  console.error("Cloud delete failed", err);
+              if (saleToDelete) {
+                  // Attempt to return stock
+                  updateInventoryStock(saleToDelete.items, availableInventory, true);
+                  
+                  const updatedSales = sales.filter(s => s.id !== id);
+                  syncSalesToCloud(updatedSales); // Scalable delete
+                  
+                  setSelectedSale(null); // Close modal
+                  if (currentUser) logAuditAction('Delete', `Eliminó venta ${id}`, currentUser);
               }
+          } catch(err) {
+              console.error("Error deleting sale", err);
+              alert("Error al eliminar. Verifique conexión.");
           }
       }
   };
 
+  // ... (PDF Logic and rest of component remains identical) ...
   // --- PDF Logic ---
   useEffect(() => {
       if (pdfActionData && printRef.current) {
@@ -531,18 +575,28 @@ export const Sales = () => {
       setPdfActionData({ data: sale, action });
   };
 
-  const handleShareWhatsApp = (sale: Sale, e?: React.MouseEvent) => {
-      e?.preventDefault();
-      e?.stopPropagation();
+  const handleShareWhatsApp = (saleToShare: Sale) => {
+      if (!saleToShare) return;
+      
       let baseUrl = window.location.href.split('#')[0];
       if (baseUrl.startsWith('blob:')) baseUrl = baseUrl.replace('blob:', '');
-      const publicLink = `${baseUrl}#/view/sale/${sale.id}`;
+      const publicLink = `${baseUrl}#/view/sale/${saleToShare.id}`;
       
-      const itemsList = sale.items.map(i => `- ${i.quantity}x ${i.description}`).join('\n');
+      const itemsList = saleToShare.items.map(i => `- ${i.quantity}x ${i.description}`).join('\n');
 
-      const text = `Le envío el Recibo ${sale.id}\n\nResumen:\n${itemsList}\n\nTotal: ${formatCurrency(sale.total, settings)}\n\nPuede revisarlo y descargar el recibo aquí:\n${publicLink}`;
+      const text = `Le envío el Recibo ${saleToShare.id}\n\nResumen:\n${itemsList}\n\nTotal: ${formatCurrency(saleToShare.total, settings)}\n\nPuede revisarlo y descargar el recibo aquí:\n${publicLink}`;
       
       window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const handleCopyLink = () => {
+      if (!shareSale) return;
+      let baseUrl = window.location.href.split('#')[0];
+      if (baseUrl.startsWith('blob:')) baseUrl = baseUrl.replace('blob:', '');
+      const publicLink = `${baseUrl}#/view/sale/${shareSale.id}`;
+      navigator.clipboard.writeText(publicLink);
+      setIsShareModalOpen(false);
+      alert("Enlace copiado al portapapeles.");
   };
 
   const handlePreview = (sale: Sale, e?: React.MouseEvent) => {
@@ -601,7 +655,7 @@ export const Sales = () => {
                     <div className="w-28 text-right">Total</div>
                 </div>
                 <div className="divide-y divide-gray-100">
-                    {saleData.items.map((item, idx) => (
+                    {saleData.items?.map((item, idx) => (
                         <div key={idx} className="flex px-4 py-3 text-sm items-center">
                             <div className="flex-1 font-medium text-gray-800 leading-snug">{item.description}</div>
                             <div className="w-20 text-center text-gray-500">{item.quantity}</div>
@@ -617,9 +671,13 @@ export const Sales = () => {
                     <div className="mb-6">
                         <h4 className="font-bold text-gray-900 mb-2 text-[11px] uppercase tracking-wide">El monto de:</h4>
                         <div className="text-sm font-bold text-gray-700 italic border-l-4 border-gray-300 pl-3 py-1">
-                            {/* Uses the new number to words algorithm */}
                             {convertNumberToWordsEs(saleData.total, settings.currencyName)}
                         </div>
+                    </div>
+                    {/* Add Disclaimer */}
+                    <div className="mt-8 text-xs text-gray-500 italic bg-gray-50 p-3 rounded border border-gray-100">
+                        <p>Nota: Este documento no es válido para crédito fiscal.</p>
+                        <p className="mt-1">¡Gracias por su preferencia!</p>
                     </div>
                 </div>
                 <div className="w-[35%] flex flex-col items-end">
@@ -659,17 +717,17 @@ export const Sales = () => {
         )}
 
         {/* Header and View toggle */}
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
             <div>
                 <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Ventas</h1>
                 <p className="text-sm text-gray-500">Punto de venta</p>
             </div>
             {view === 'list' ? (
-                <button onClick={() => { setEditingId(null); setNewSale({ items: [], amountPaid: 0, subtotal: 0, discount: 0, tax: 0, total: 0, paymentStatus: 'Paid', paymentMethod: 'Cash' }); setTaxEnabled(false); setView('create'); }} className="bg-brand-900 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-800 flex items-center gap-2 shadow-lg active:scale-95 transition-transform">
+                <button onClick={() => { setEditingId(null); setNewSale({ items: [], amountPaid: 0, subtotal: 0, discount: 0, tax: 0, total: 0, paymentStatus: 'Paid', paymentMethod: 'Cash' }); setTaxEnabled(false); setView('create'); }} className="bg-brand-900 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-brand-800 flex items-center gap-2 shadow-lg active:scale-95 transition-transform min-h-[44px]">
                     <Plus size={18} /> <span className="hidden sm:inline">Nueva Venta</span>
                 </button>
             ) : (
-                <button onClick={() => setView('list')} className="bg-white border border-gray-200 text-gray-700 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors">
+                <button onClick={handleCancelEdit} className="bg-white border border-gray-200 text-gray-700 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors min-h-[44px]">
                     Cancelar
                 </button>
             )}
@@ -688,15 +746,18 @@ export const Sales = () => {
                                     <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Fecha</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase">Total</th>
                                     <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-center">Estado</th>
-                                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right">Acciones</th>
+                                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase text-right">Ver</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
                                 {sales.map(sale => (
-                                    <tr key={sale.id} className="hover:bg-gray-50 transition-colors">
+                                    <tr key={sale.id} onClick={() => setSelectedSale(sale)} className="hover:bg-gray-50 transition-colors cursor-pointer group">
                                         <td className="px-6 py-4 text-sm font-bold text-brand-900">{sale.id}</td>
                                         <td className="px-6 py-4 text-sm text-gray-700">{sale.clientName}</td>
-                                        <td className="px-6 py-4 text-sm text-gray-500">{sale.date ? new Date(sale.date).toLocaleDateString() : 'N/A'}</td>
+                                        <td className="px-6 py-4 text-sm text-gray-500">
+                                            <div className="font-medium text-gray-900">{sale.date ? new Date(sale.date).toLocaleDateString() : 'N/A'}</div>
+                                            <div className="text-xs text-gray-400">{sale.date ? new Date(sale.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''}</div>
+                                        </td>
                                         <td className="px-6 py-4 text-sm font-bold text-gray-900">{formatCurrency(sale.total, settings)}</td>
                                         <td className="px-6 py-4 text-center">
                                             <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase ${sale.paymentStatus === 'Paid' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
@@ -704,22 +765,7 @@ export const Sales = () => {
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <div className="flex justify-end gap-1 relative z-50">
-                                                <button onClick={(e) => handlePreview(sale, e)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Vista Previa"><Eye size={18} /></button>
-                                                <button onClick={(e) => handleShareWhatsApp(sale, e)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Compartir"><Share2 size={18} /></button>
-                                                <button onClick={(e) => handleDirectAction(sale, 'download', e)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Descargar"><Download size={18} /></button>
-                                                <button onClick={(e) => handleDirectAction(sale, 'print', e)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Imprimir"><Printer size={18} /></button>
-                                                <button onClick={(e) => handleEditSale(sale, e)} className="p-2 text-orange-500 hover:bg-orange-50 rounded-lg transition-colors" title="Editar"><Edit3 size={18} /></button>
-                                                {canDelete && (
-                                                    <button 
-                                                        onClick={(e) => handleDeleteSale(sale.id, e)} 
-                                                        className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors relative z-50" 
-                                                        title="Eliminar (Auditado)"
-                                                    >
-                                                        <Trash2 size={18} />
-                                                    </button>
-                                                )}
-                                            </div>
+                                            <ChevronDown size={18} className="ml-auto text-gray-300 group-hover:text-gray-500 transition-colors -rotate-90"/>
                                         </td>
                                     </tr>
                                 ))}
@@ -732,8 +778,9 @@ export const Sales = () => {
                 {/* Mobile Card View */}
                 <div className="md:hidden flex-1 overflow-y-auto space-y-3 pb-20">
                     {sales.map(sale => (
-                        <div key={sale.id} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex flex-col gap-3 relative">
-                            <div className="flex justify-between items-start">
+                        <div key={sale.id} onClick={() => setSelectedSale(sale)} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex flex-col gap-3 relative cursor-pointer overflow-hidden">
+                            <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${sale.paymentStatus === 'Paid' ? 'bg-green-500' : 'bg-orange-500'}`}></div>
+                            <div className="flex justify-between items-start pl-2">
                                 <div>
                                     <h4 className="font-bold text-brand-900 text-sm">{sale.id}</h4>
                                     <p className="text-sm text-gray-700 font-medium">{sale.clientName}</p>
@@ -743,21 +790,9 @@ export const Sales = () => {
                                     {sale.paymentStatus === 'Paid' ? 'Pagado' : 'Pendiente'}
                                 </span>
                             </div>
-                            <div className="flex justify-between items-center pt-2 border-t border-gray-50">
+                            <div className="flex justify-between items-center pt-2 border-t border-gray-50 pl-2">
                                 <span className="font-bold text-lg text-gray-900">{formatCurrency(sale.total, settings)}</span>
-                                <div className="flex gap-1 relative z-50">
-                                    <button onClick={(e) => handlePreview(sale, e)} className="p-2 bg-gray-50 text-gray-600 rounded-lg"><Eye size={16}/></button>
-                                    <button onClick={(e) => handleShareWhatsApp(sale, e)} className="p-2 bg-green-50 text-green-600 rounded-lg"><Share2 size={16}/></button>
-                                    <button onClick={(e) => handleDirectAction(sale, 'print', e)} className="p-2 bg-gray-50 text-gray-600 rounded-lg"><Printer size={16}/></button>
-                                    {canDelete && (
-                                        <button 
-                                            onClick={(e) => handleDeleteSale(sale.id, e)} 
-                                            className="p-2 bg-red-50 text-red-600 rounded-lg relative z-50"
-                                        >
-                                            <Trash2 size={16}/>
-                                        </button>
-                                    )}
-                                </div>
+                                <button className="text-sm text-blue-600 font-medium hover:underline">Ver Detalles</button>
                             </div>
                         </div>
                     ))}
@@ -766,14 +801,14 @@ export const Sales = () => {
             </div>
         )}
 
-        {/* CREATE / EDIT VIEW (POS Interface) */}
+        {/* ... (Create View Remains Unchanged) ... */}
         {view === 'create' && (
             <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden h-full">
                 {/* Left Column: Items List */}
                 <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                         <h3 className="font-bold text-gray-800">Detalle de Venta</h3>
-                        <button onClick={() => setModalType('catalog')} className="text-sm bg-brand-900 text-white px-4 py-2 rounded-xl font-medium hover:bg-brand-800 flex items-center gap-2 transition-colors shadow-lg shadow-brand-900/20 active:scale-95">
+                        <button onClick={() => setModalType('catalog')} className="text-sm bg-brand-900 text-white px-4 py-2 rounded-xl font-medium hover:bg-brand-800 flex items-center gap-2 transition-colors shadow-lg shadow-brand-900/20 active:scale-95 min-h-[40px]">
                             <Plus size={16} /> Agregar Ítem
                         </button>
                     </div>
@@ -807,9 +842,9 @@ export const Sales = () => {
                                             </td>
                                             <td className="px-4 py-3 text-center">
                                                 <div className="flex items-center justify-center gap-2 bg-gray-100 rounded-lg p-1 w-fit mx-auto border border-gray-200">
-                                                    <button onClick={() => handleUpdateQuantity(idx, -1)} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:text-red-500 text-xs font-bold transition-all active:scale-90">-</button>
+                                                    <button onClick={() => handleUpdateQuantity(idx, -1)} className="w-8 h-8 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:text-red-500 text-xs font-bold transition-all active:scale-90 min-h-[32px]">-</button>
                                                     <span className="text-sm font-bold w-6 text-center text-gray-800">{item.quantity}</span>
-                                                    <button onClick={() => handleUpdateQuantity(idx, 1)} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:text-green-600 text-xs font-bold transition-all active:scale-90">+</button>
+                                                    <button onClick={() => handleUpdateQuantity(idx, 1)} className="w-8 h-8 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:text-green-600 text-xs font-bold transition-all active:scale-90 min-h-[32px]">+</button>
                                                 </div>
                                             </td>
                                             <td className="px-4 py-3 text-right">
@@ -830,7 +865,7 @@ export const Sales = () => {
                                                 {formatCurrency(item.total, settings)}
                                             </td>
                                             <td className="px-2 text-center">
-                                                <button onClick={() => handleRemoveItem(idx)} className="text-gray-400 hover:text-red-500 transition-colors p-2 rounded-full hover:bg-red-50">
+                                                <button onClick={() => handleRemoveItem(idx)} className="text-red-400 hover:text-red-600 transition-colors p-2 rounded-full hover:bg-red-50 min-h-[40px] min-w-[40px] flex items-center justify-center">
                                                     <Trash2 size={16} />
                                                 </button>
                                             </td>
@@ -874,7 +909,7 @@ export const Sales = () => {
                                 </div>
                             </div>
                         ) : (
-                            <button onClick={() => setModalType('client')} className="w-full py-4 border-2 border-dashed border-gray-300 rounded-xl text-gray-400 hover:border-brand-900 hover:text-brand-900 transition-all flex flex-col items-center gap-2 group bg-gray-50/50 hover:bg-white">
+                            <button onClick={() => setModalType('client')} className="w-full py-4 border-2 border-dashed border-gray-300 rounded-xl text-gray-400 hover:border-brand-900 hover:text-brand-900 transition-all flex flex-col items-center gap-2 group bg-gray-50/50 hover:bg-white min-h-[100px] justify-center">
                                 <div className="bg-white p-2 rounded-full shadow-sm group-hover:shadow-md transition-shadow">
                                     <Plus size={20} />
                                 </div>
@@ -925,14 +960,14 @@ export const Sales = () => {
                         <div className="grid grid-cols-2 gap-3">
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Estado</label>
-                                <select className="w-full px-4 py-3 bg-white border border-gray-300 text-gray-900 rounded-xl text-sm font-medium outline-none focus:border-brand-900 focus:ring-1 focus:ring-brand-900 transition-all appearance-none cursor-pointer shadow-sm" value={newSale.paymentStatus} onChange={e => setNewSale({...newSale, paymentStatus: e.target.value as any})}>
+                                <select className="w-full px-4 py-3 bg-white border border-gray-300 text-gray-900 rounded-xl text-sm font-medium outline-none focus:border-brand-900 focus:ring-1 focus:ring-brand-900 transition-all appearance-none cursor-pointer shadow-sm min-h-[48px]" value={newSale.paymentStatus} onChange={e => setNewSale({...newSale, paymentStatus: e.target.value as any})}>
                                     <option value="Paid" className="text-gray-900 font-bold">Pagado</option>
                                     <option value="Pending" className="text-gray-900 font-bold">Pendiente</option>
                                 </select>
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Método</label>
-                                <select className="w-full px-4 py-3 bg-white border border-gray-300 text-gray-900 rounded-xl text-sm font-medium outline-none focus:border-brand-900 focus:ring-1 focus:ring-brand-900 transition-all appearance-none cursor-pointer shadow-sm" value={newSale.paymentMethod} onChange={e => setNewSale({...newSale, paymentMethod: e.target.value as any})}>
+                                <select className="w-full px-4 py-3 bg-white border border-gray-300 text-gray-900 rounded-xl text-sm font-medium outline-none focus:border-brand-900 focus:ring-1 focus:ring-brand-900 transition-all appearance-none cursor-pointer shadow-sm min-h-[48px]" value={newSale.paymentMethod} onChange={e => setNewSale({...newSale, paymentMethod: e.target.value as any})}>
                                     <option value="Cash" className="text-gray-900">Efectivo</option>
                                     <option value="QR" className="text-gray-900">QR Simple</option>
                                     <option value="Transfer" className="text-gray-900">Transferencia</option>
@@ -944,22 +979,132 @@ export const Sales = () => {
                         {newSale.paymentStatus !== 'Paid' && (
                             <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-100">
                                 <label className="block text-xs font-bold text-yellow-800 uppercase mb-1 ml-1">A Cuenta (Bs)</label>
-                                <input type="number" className="w-full px-4 py-2 bg-white border border-yellow-200 rounded-lg text-lg font-bold text-gray-900 outline-none focus:border-yellow-500" value={newSale.amountPaid || ''} onChange={e => setNewSale({...newSale, amountPaid: Number(e.target.value)})} placeholder="0.00" />
+                                <input type="number" className="w-full px-4 py-2 bg-white border border-yellow-200 rounded-lg text-lg font-bold text-gray-900 outline-none focus:border-yellow-500 min-h-[44px]" value={newSale.amountPaid || ''} onChange={e => setNewSale({...newSale, amountPaid: Number(e.target.value)})} placeholder="0.00" />
                             </div>
                         )}
 
                         <button 
                             onClick={handleFinalizeSale}
                             disabled={!newSale.clientName || !newSale.items?.length}
-                            className="w-full mt-auto py-4 bg-brand-900 text-white rounded-xl font-bold text-lg shadow-xl hover:bg-brand-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95 flex items-center justify-center gap-2"
+                            className="w-full mt-auto py-4 bg-brand-900 text-white rounded-xl font-bold text-lg shadow-xl hover:bg-brand-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95 flex items-center justify-center gap-2 min-h-[56px]"
                         >
                             <Check size={24} /> {editingId ? 'Guardar Cambios' : 'Confirmar Venta'}
                         </button>
                     </div>
                 </div>
+            )}
+        </div>
+        
+        {/* SALE DETAIL MODAL (WIDER LAYOUT) */}
+        {selectedSale && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                <div className="bg-white rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
+                    {/* Header */}
+                    <div className="p-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-start">
+                        <div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <h3 className="text-xl font-bold text-brand-900">{selectedSale.id}</h3>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase border ${selectedSale.paymentStatus === 'Paid' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-orange-100 text-orange-700 border-orange-200'}`}>
+                                    {selectedSale.paymentStatus === 'Paid' ? 'Pagado' : 'Pendiente'}
+                                </span>
+                            </div>
+                            <p className="text-xs text-gray-500 flex items-center gap-1">
+                                <Calendar size={12}/> {new Date(selectedSale.date).toLocaleDateString()} {new Date(selectedSale.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            </p>
+                        </div>
+                        <button onClick={() => setSelectedSale(null)} className="p-2 hover:bg-red-50 hover:text-red-600 rounded-full text-gray-500 transition-colors"><X size={24}/></button>
+                    </div>
+
+                    {/* Body - Grid Layout */}
+                    <div className="flex-1 overflow-y-auto p-0">
+                        <div className="grid grid-cols-1 md:grid-cols-3 h-full">
+                            {/* Left: Info & Items */}
+                            <div className="md:col-span-2 p-6 space-y-6 border-b md:border-b-0 md:border-r border-gray-100">
+                                <div className="flex items-center gap-4 bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                    <div className="w-12 h-12 rounded-full bg-white text-brand-900 flex items-center justify-center shadow-sm font-bold text-xl">{selectedSale.clientName.charAt(0)}</div>
+                                    <div>
+                                        <p className="text-xs text-gray-400 font-bold uppercase tracking-wider">Cliente</p>
+                                        <p className="font-bold text-gray-900 text-lg">{selectedSale.clientName}</p>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <p className="text-xs text-gray-400 font-bold uppercase mb-3 border-b border-gray-100 pb-1">Detalle de Venta</p>
+                                    <div className="space-y-3">
+                                        {selectedSale.items?.map((item, idx) => (
+                                            <div key={idx} className="flex justify-between items-center text-sm p-3 hover:bg-gray-50 rounded-lg transition-colors border border-transparent hover:border-gray-100">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="font-bold text-brand-900 bg-brand-50 px-2 py-1 rounded text-xs">{item.quantity}x</span> 
+                                                    <span className="text-gray-700 font-medium">{item.description}</span>
+                                                </div>
+                                                <span className="font-bold text-gray-900">{formatCurrency(item.total, settings)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Right: Totals & Actions */}
+                            <div className="md:col-span-1 bg-gray-50/50 p-6 flex flex-col gap-6">
+                                <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-3">
+                                    <div className="flex justify-between text-sm text-gray-500"><span>Subtotal</span><span>{formatCurrency(selectedSale.subtotal, settings)}</span></div>
+                                    {selectedSale.discount !== undefined && selectedSale.discount > 0 && <div className="flex justify-between text-sm text-red-500"><span>Descuento</span><span>-{formatCurrency(selectedSale.subtotal * (selectedSale.discount/100), settings)}</span></div>}
+                                    {selectedSale.tax > 0 && <div className="flex justify-between text-sm text-gray-500"><span>Impuesto</span><span>{formatCurrency(selectedSale.tax, settings)}</span></div>}
+                                    <div className="flex justify-between text-xl font-black text-brand-900 border-t border-gray-200 pt-3 mt-1"><span>Total</span><span>{formatCurrency(selectedSale.total, settings)}</span></div>
+                                    {selectedSale.amountPaid !== undefined && selectedSale.amountPaid < selectedSale.total && (
+                                        <div className="flex justify-between text-sm text-green-600 border-t border-gray-200 pt-2">
+                                            <span>Pagado</span><span>{formatCurrency(selectedSale.amountPaid, settings)}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="flex-1"></div> {/* Spacer */}
+
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button onClick={(e) => handlePreview(selectedSale, e)} className="flex items-center justify-center gap-2 p-3 bg-white border border-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-50 transition-colors min-h-[48px]">
+                                            <Eye size={18}/> Vista PDF
+                                        </button>
+                                        <button onClick={(e) => handleDirectAction(selectedSale, 'print', e)} className="flex items-center justify-center gap-2 p-3 bg-white border border-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-50 transition-colors min-h-[48px]">
+                                            <Printer size={18}/> Imprimir
+                                        </button>
+                                        <button onClick={(e) => { setShareSale(selectedSale); setIsShareModalOpen(true); }} className="col-span-2 flex items-center justify-center gap-2 p-3 bg-green-50 text-green-700 border border-green-100 rounded-xl font-bold hover:bg-green-100 transition-colors min-h-[48px]">
+                                            <Share2 size={18}/> Compartir
+                                        </button>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-200">
+                                        <button onClick={(e) => handleEditSale(selectedSale, e)} className="flex items-center justify-center gap-2 p-2 text-blue-600 hover:bg-blue-50 rounded-lg text-sm font-bold transition-colors min-h-[44px]">
+                                            <Edit3 size={16}/> Editar
+                                        </button>
+                                        {canDelete ? (
+                                            <button onClick={(e) => handleDeleteSale(selectedSale.id, e)} className="flex items-center justify-center gap-2 p-2 text-red-600 hover:bg-red-50 rounded-lg text-sm font-bold transition-colors min-h-[44px]">
+                                                <Trash2 size={16}/> Eliminar
+                                            </button>
+                                        ) : <span className="text-center text-gray-300 text-sm py-2">No borrable</span>}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         )}
-        
+
+        {/* Share Modal (Same as Quotations) */}
+        {isShareModalOpen && shareSale && (
+            <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6 relative animate-in zoom-in duration-200 mx-4">
+                    <button onClick={() => setIsShareModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-red-600 p-1 rounded-full hover:bg-red-50"><X size={20}/></button>
+                    <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2"><Share2 size={20} className="text-brand-900"/> Compartir Recibo</h3>
+                    <div className="space-y-3">
+                        <button onClick={() => handleShareWhatsApp(shareSale)} className="w-full py-3 bg-[#25D366] hover:bg-[#20bd5a] text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors min-h-[48px]">Enviar por WhatsApp</button>
+                        <button onClick={handleCopyLink} className="w-full py-3 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors min-h-[48px]"><Copy size={18}/> Copiar Enlace</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* PREVIEW MODAL */}
         {modalType === 'preview' && pdfPreview && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -967,12 +1112,12 @@ export const Sales = () => {
                     <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-gray-50">
                         <h3 className="font-bold text-lg text-gray-900">Vista Previa</h3>
                         <div className="flex gap-2">
-                             <button onClick={() => handleDirectAction(pdfPreview, 'download')} className="px-4 py-2 bg-brand-900 text-white rounded-lg text-sm font-bold hover:bg-brand-800 flex items-center gap-2"><Download size={16}/> Descargar</button>
-                             <button onClick={() => setModalType('none')} className="p-2 hover:bg-gray-200 rounded-full text-gray-500"><X size={20}/></button>
+                             <button onClick={() => handleDirectAction(pdfPreview, 'download')} className="px-4 py-2 bg-brand-900 text-white rounded-lg text-sm font-bold hover:bg-brand-800 flex items-center gap-2 min-h-[44px]"><Download size={16}/> Descargar</button>
+                             <button onClick={() => setModalType('none')} className="p-2 hover:bg-red-50 hover:text-red-600 rounded-full text-gray-500 min-h-[44px] min-w-[44px] flex items-center justify-center"><X size={20}/></button>
                         </div>
                     </div>
-                    <div className="flex-1 overflow-y-auto bg-gray-100 p-8 flex justify-center">
-                        <div className="shadow-2xl origin-top transform scale-90 md:scale-100">
+                    <div className="flex-1 overflow-y-auto bg-gray-100 p-4 flex justify-center items-start">
+                        <div className="shadow-2xl origin-top transform scale-[0.45] sm:scale-75 md:scale-90 lg:scale-100 mt-4">
                             {renderReceiptContent(pdfPreview)}
                         </div>
                     </div>
@@ -980,13 +1125,14 @@ export const Sales = () => {
             </div>
         )}
 
+        {/* ... (Catalog and Client modals remain same structure, omitted for brevity but preserved in full implementation) ... */}
         {/* CATALOG MODAL */}
         {modalType === 'catalog' && (
             <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                 <div className="bg-white rounded-2xl w-full max-w-5xl h-[80vh] flex flex-col shadow-2xl animate-in zoom-in duration-200 mx-4 overflow-hidden border border-gray-200">
                     <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-20">
                         <div><h3 className="font-bold text-xl text-gray-900">Catálogo</h3><p className="text-sm text-gray-500">Selecciona ítems para la venta</p></div>
-                        <button onClick={() => setModalType('none')} className="text-gray-400 hover:text-gray-900 p-2 rounded-full hover:bg-gray-100"><X size={24}/></button>
+                        <button onClick={() => setModalType('none')} className="text-gray-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50"><X size={24}/></button>
                     </div>
                     <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex flex-col md:flex-row gap-4 items-center">
                         <div className="relative flex-1 w-full">
@@ -1021,13 +1167,13 @@ export const Sales = () => {
                                                 )}
                                             </div>
                                             <div className="w-full md:w-auto flex flex-col sm:flex-row gap-2 md:gap-3 flex-shrink-0 mt-4 md:mt-0">
-                                                <button onClick={() => handleAddItem(item)} className="flex flex-col items-center justify-center px-4 py-2 bg-gray-100 hover:bg-gray-200 border border-transparent rounded-lg text-gray-900 transition-all min-w-[100px] active:scale-95">
+                                                <button onClick={() => handleAddItem(item)} className="flex flex-col items-center justify-center px-4 py-2 bg-gray-100 hover:bg-gray-200 border border-transparent rounded-lg text-gray-900 transition-all min-w-[100px] active:scale-95 min-h-[44px]">
                                                     <span className="text-[10px] font-bold text-gray-500 uppercase">Unitario</span>
                                                     <span className="text-sm font-bold">{formatCurrency(item.price, settings)}</span>
                                                 </button>
-                                                {item.priceDozen && item.priceDozen > 0 && <button onClick={() => handleAddItem(item, item.priceDozen)} className="flex flex-col items-center justify-center px-4 py-2 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 rounded-lg text-gray-700 transition-all min-w-[100px] active:scale-95"><span className="text-[10px] font-bold text-gray-400 uppercase">Mayorista A</span><span className="text-sm font-bold text-blue-700">{formatCurrency(item.priceDozen, settings)}</span></button>}
-                                                {item.priceBox && item.priceBox > 0 && <button onClick={() => handleAddItem(item, item.priceBox)} className="flex flex-col items-center justify-center px-4 py-2 bg-white border border-gray-200 hover:border-orange-300 hover:bg-orange-50 rounded-lg text-gray-700 transition-all min-w-[100px] active:scale-95"><span className="text-[10px] font-bold text-gray-400 uppercase">Mayorista B</span><span className="text-sm font-bold text-orange-700">{formatCurrency(item.priceBox, settings)}</span></button>}
-                                                {item.priceWholesale && item.priceWholesale > 0 && <button onClick={() => handleAddItem(item, item.priceWholesale)} className="flex flex-col items-center justify-center px-4 py-2 bg-white border border-gray-200 hover:border-purple-300 hover:bg-purple-50 rounded-lg text-gray-700 transition-all min-w-[100px] active:scale-95"><span className="text-[10px] font-bold text-gray-400 uppercase">Mayorista C</span><span className="text-sm font-bold text-purple-700">{formatCurrency(item.priceWholesale, settings)}</span></button>}
+                                                {item.priceDozen && item.priceDozen > 0 && <button onClick={() => handleAddItem(item, item.priceDozen)} className="flex flex-col items-center justify-center px-4 py-2 bg-white border border-gray-200 hover:border-blue-300 hover:bg-blue-50 rounded-lg text-gray-700 transition-all min-w-[100px] active:scale-95 min-h-[44px]"><span className="text-[10px] font-bold text-gray-400 uppercase">Mayorista A</span><span className="text-sm font-bold text-blue-700">{formatCurrency(item.priceDozen, settings)}</span></button>}
+                                                {item.priceBox && item.priceBox > 0 && <button onClick={() => handleAddItem(item, item.priceBox)} className="flex flex-col items-center justify-center px-4 py-2 bg-white border border-gray-200 hover:border-orange-300 hover:bg-orange-50 rounded-lg text-gray-700 transition-all min-w-[100px] active:scale-95 min-h-[44px]"><span className="text-[10px] font-bold text-gray-400 uppercase">Mayorista B</span><span className="text-sm font-bold text-orange-700">{formatCurrency(item.priceBox, settings)}</span></button>}
+                                                {item.priceWholesale && item.priceWholesale > 0 && <button onClick={() => handleAddItem(item, item.priceWholesale)} className="flex flex-col items-center justify-center px-4 py-2 bg-white border border-gray-200 hover:border-purple-300 hover:bg-purple-50 rounded-lg text-gray-700 transition-all min-w-[100px] active:scale-95 min-h-[44px]"><span className="text-[10px] font-bold text-gray-400 uppercase">Mayorista C</span><span className="text-sm font-bold text-purple-700">{formatCurrency(item.priceWholesale, settings)}</span></button>}
                                             </div>
                                         </div>
                                     </div>
@@ -1050,7 +1196,7 @@ export const Sales = () => {
                 <div className="bg-white rounded-2xl w-full max-w-md h-[550px] shadow-2xl animate-in zoom-in duration-200 overflow-hidden flex flex-col relative mx-4">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                         <h3 className="font-bold text-gray-900">{isCreatingClient ? 'Nuevo Cliente' : 'Seleccionar Cliente'}</h3>
-                        <button onClick={() => setModalType('none')}><X size={20} className="text-gray-400 hover:text-gray-600"/></button>
+                        <button onClick={() => setModalType('none')} className="p-2 rounded-full hover:bg-red-50 hover:text-red-600 text-gray-400"><X size={20}/></button>
                     </div>
                     {!isCreatingClient ? (
                         <div className="flex flex-col h-full">
@@ -1059,12 +1205,12 @@ export const Sales = () => {
                                     <Search className="absolute left-3 top-2.5 text-gray-400" size={18}/>
                                     <input autoFocus type="text" placeholder="Buscar..." className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand-500 bg-white text-gray-900" value={modalSearch} onChange={e => setModalSearch(e.target.value)} />
                                 </div>
-                                <button onClick={() => setIsCreatingClient(true)} className="px-3 bg-brand-900 text-white rounded-xl text-sm font-bold hover:bg-brand-800 flex items-center gap-1"><Plus size={16}/> Nuevo</button>
+                                <button onClick={() => setIsCreatingClient(true)} className="px-3 bg-brand-900 text-white rounded-xl text-sm font-bold hover:bg-brand-800 flex items-center gap-1 min-h-[40px]"><Plus size={16}/> Nuevo</button>
                             </div>
                             <div className="flex-1 overflow-y-auto p-4 space-y-1">
                                 {isLoadingData && availableClients.length === 0 && <div className="flex justify-center py-8"><RefreshCw className="animate-spin text-brand-900" /></div>}
                                 {filteredClients.map(c => (
-                                    <button key={c.id} onClick={() => { setNewSale({...newSale, clientName: c.name, clientId: c.id}); setModalType('none'); }} className="w-full text-left p-3 hover:bg-gray-50 rounded-lg flex items-center gap-3 transition-colors group border border-transparent hover:border-gray-200">
+                                    <button key={c.id} onClick={() => { setNewSale({...newSale, clientName: c.name, clientId: c.id}); setModalType('none'); }} className="w-full text-left p-3 hover:bg-gray-50 rounded-lg flex items-center gap-3 transition-colors group border border-transparent hover:border-gray-200 min-h-[48px]">
                                         <div className="w-8 h-8 rounded-full bg-brand-50 text-brand-900 flex items-center justify-center font-bold text-xs group-hover:bg-brand-900 group-hover:text-white transition-colors">{c.name.charAt(0)}</div>
                                         <div><p className="font-bold text-sm text-gray-900">{c.name}</p><p className="text-xs text-gray-500">{c.company}</p></div>
                                     </button>
@@ -1074,18 +1220,18 @@ export const Sales = () => {
                     ) : (
                         <div className="p-6 flex flex-col h-full overflow-y-auto">
                             <div className="space-y-4">
-                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Nombre Completo</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900" value={clientData.name} onChange={e => setClientData({...clientData, name: e.target.value})} /></div>
-                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Empresa</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900" value={clientData.company} onChange={e => setClientData({...clientData, company: e.target.value})} /></div>
-                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">{settings.taxIdLabel || 'NIT'}</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900" value={clientData.nit} onChange={e => setClientData({...clientData, nit: e.target.value})} /></div>
+                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Nombre Completo</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 min-h-[44px]" value={clientData.name} onChange={e => setClientData({...clientData, name: e.target.value})} /></div>
+                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Empresa</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 min-h-[44px]" value={clientData.company} onChange={e => setClientData({...clientData, company: e.target.value})} /></div>
+                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">{settings.taxIdLabel || 'NIT'}</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 min-h-[44px]" value={clientData.nit} onChange={e => setClientData({...clientData, nit: e.target.value})} /></div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Teléfono</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900" value={clientData.phone} onChange={e => setClientData({...clientData, phone: e.target.value})} /></div>
-                                    <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Email</label><input type="email" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900" value={clientData.email} onChange={e => setClientData({...clientData, email: e.target.value})} /></div>
+                                    <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Teléfono</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 min-h-[44px]" value={clientData.phone} onChange={e => setClientData({...clientData, phone: e.target.value})} /></div>
+                                    <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Email</label><input type="email" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 min-h-[44px]" value={clientData.email} onChange={e => setClientData({...clientData, email: e.target.value})} /></div>
                                 </div>
-                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Dirección</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900" value={clientData.address} onChange={e => setClientData({...clientData, address: e.target.value})} /></div>
+                                <div><label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Dirección</label><input type="text" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 min-h-[44px]" value={clientData.address} onChange={e => setClientData({...clientData, address: e.target.value})} /></div>
                             </div>
                             <div className="mt-auto flex gap-3 pt-6">
-                                <button onClick={() => setIsCreatingClient(false)} className="flex-1 py-2 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50">Cancelar</button>
-                                <button onClick={handleCreateClient} className="flex-1 py-2 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800">Guardar</button>
+                                <button onClick={() => setIsCreatingClient(false)} className="flex-1 py-2 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 min-h-[44px]">Cancelar</button>
+                                <button onClick={handleCreateClient} className="flex-1 py-2 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 min-h-[44px]">Guardar</button>
                             </div>
                         </div>
                     )}
