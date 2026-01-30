@@ -14,7 +14,7 @@
     <meta property="og:site_name" content="Bráma Studio CRM" />
     
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script>
       tailwind.config = {
         darkMode: 'class',
@@ -25,14 +25,14 @@
             },
             colors: {
               brand: {
-                50: '#f4f6f7',
-                100: '#eef1f3',
-                200: '#dde2e5',
+                50: '#f8fafc',
+                100: '#f1f5f9',
+                200: '#e2e8f0',
                 500: '#00f24a',
                 600: '#00d640',
                 700: '#00b034',
-                800: '#1e3a5a',
-                900: '#162836',
+                800: '#1e293b', // Modern Dark Slate
+                900: '#0f172a', // Deepest Slate
               },
               accent: {
                 purple: '#8b5cf6',
@@ -41,6 +41,10 @@
             },
             screens: {
               'xs': '475px',
+            },
+            boxShadow: {
+              'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+              'glow': '0 0 15px rgba(0, 242, 74, 0.3)',
             }
           }
         }
@@ -49,9 +53,18 @@
     <style>
       body {
         font-family: 'Inter', sans-serif;
-        background-color: #f4f6f7;
+        background-color: #f8fafc; /* Lighter, cleaner background */
         -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        color: #0f172a;
       }
+      
+      /* Selection Color */
+      ::selection {
+        background-color: #0f172a;
+        color: #ffffff;
+      }
+
       /* Custom Scrollbar */
       ::-webkit-scrollbar {
         width: 6px;
@@ -62,11 +75,12 @@
       }
       ::-webkit-scrollbar-thumb {
         background: #cbd5e1;
-        border-radius: 4px;
+        border-radius: 10px;
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #94a3b8;
       }
+      
       /* Remove spinner inputs */
       input[type=number]::-webkit-inner-spin-button, 
       input[type=number]::-webkit-outer-spin-button {  
@@ -76,9 +90,17 @@
       input[type=number] {
         -moz-appearance: textfield;
       }
+      
       /* Mobile tap highlight remove */
       * {
         -webkit-tap-highlight-color: transparent;
+      }
+
+      /* Smooth transitions for all interactive elements */
+      button, a, input, select {
+        transition-property: all;
+        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+        transition-duration: 200ms;
       }
     </style>
   <script type="importmap">

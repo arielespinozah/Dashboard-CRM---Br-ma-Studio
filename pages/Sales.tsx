@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Trash2, X, Package, Check, Printer, User, CreditCard, RefreshCw, Edit3, Download, Share2, Copy, Calendar, DollarSign, ChevronRight, Eye, ChevronDown, ShoppingBag, AlertCircle, AlertTriangle, FileText } from 'lucide-react';
 import { Sale, QuoteItem, AppSettings, InventoryItem, Client, User as UserType, AuditLog } from '../types';
@@ -35,7 +36,6 @@ const formatCurrency = (amount: number, settings: AppSettings) => {
 };
 
 // --- NUMBER TO WORDS CONVERTER (SPANISH) ---
-// (Functions Unidades, Decenas, etc. kept same for brevity, assuming existing logic is fine)
 const Unidades = (num: number) => {
     switch (num) {
         case 1: return "UN";
@@ -174,7 +174,7 @@ const ToggleSwitch = ({ enabled, onChange, label }: { enabled: boolean, onChange
         <div className={`w-11 h-6 rounded-full p-1 transition-colors duration-300 ease-in-out relative ${enabled ? 'bg-brand-900' : 'bg-gray-300'}`}>
             <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform duration-300 ease-in-out ${enabled ? 'translate-x-5' : 'translate-x-0'}`} />
         </div>
-        <span className={`text-sm font-medium transition-colors ${enabled ? 'text-brand-900' : 'text-gray-500'}`}>{label}</span>
+        <span className={`text-xs font-bold uppercase tracking-wider transition-colors ${enabled ? 'text-brand-900' : 'text-gray-400'}`}>{label}</span>
     </div>
 );
 
@@ -727,9 +727,14 @@ export const Sales = () => {
                     <Plus size={18} /> <span className="hidden sm:inline">Nueva Venta</span>
                 </button>
             ) : (
-                <button onClick={handleCancelEdit} className="bg-white border border-gray-200 text-gray-700 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors min-h-[44px]">
-                    Cancelar
-                </button>
+                <div className="flex gap-2">
+                    <button onClick={() => setModalType('catalog')} className="bg-brand-50 text-brand-900 px-3 py-2.5 rounded-xl text-sm font-bold hover:bg-brand-100 flex items-center gap-2 transition-colors min-h-[44px] border border-brand-100 shadow-sm">
+                        <Package size={18} /> <span className="hidden xs:inline">Catálogo</span>
+                    </button>
+                    <button onClick={handleCancelEdit} className="bg-white border border-gray-200 text-gray-700 px-3 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors min-h-[44px]">
+                        <X size={18} /> <span className="hidden xs:inline">Cancelar</span>
+                    </button>
+                </div>
             )}
         </div>
 
@@ -801,7 +806,7 @@ export const Sales = () => {
             </div>
         )}
 
-        {/* ... (Create View Remains Unchanged) ... */}
+        {/* --- MINIMALIST & MODERN CREATE VIEW --- */}
         {view === 'create' && (
             <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden h-full">
                 {/* Left Column: Items List */}
@@ -809,7 +814,7 @@ export const Sales = () => {
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                         <h3 className="font-bold text-gray-800">Detalle de Venta</h3>
                         <button onClick={() => setModalType('catalog')} className="text-sm bg-brand-900 text-white px-4 py-2 rounded-xl font-medium hover:bg-brand-800 flex items-center gap-2 transition-colors shadow-lg shadow-brand-900/20 active:scale-95 min-h-[40px]">
-                            <Plus size={16} /> Agregar Ítem
+                            <Plus size={16} /> <span className="hidden xs:inline">Agregar Ítem</span>
                         </button>
                     </div>
                     
@@ -922,6 +927,11 @@ export const Sales = () => {
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-5 flex-1">
                         <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm uppercase tracking-wide"><CreditCard size={16}/> Resumen</h3>
                         
+                        {/* Mobile Catalog Shortcut inside Totals Panel */}
+                        <button onClick={() => setModalType('catalog')} className="w-full mb-2 py-3 border-2 border-dashed border-gray-200 rounded-xl text-gray-500 hover:border-brand-500 hover:text-brand-900 font-bold text-xs flex items-center justify-center gap-2 transition-all hover:bg-brand-50/20 md:hidden min-h-[44px]">
+                            <Plus size={14} /> AGREGAR ÍTEMS
+                        </button>
+
                         <div className="space-y-3 pb-6 border-b border-gray-100">
                             <div className="flex justify-between text-sm text-gray-600">
                                 <span className="font-medium">Subtotal</span>
@@ -992,8 +1002,8 @@ export const Sales = () => {
                         </button>
                     </div>
                 </div>
-            )}
-        </div>
+            </div>
+        )}
         
         {/* SALE DETAIL MODAL (WIDER LAYOUT) */}
         {selectedSale && (
@@ -1125,7 +1135,6 @@ export const Sales = () => {
             </div>
         )}
 
-        {/* ... (Catalog and Client modals remain same structure, omitted for brevity but preserved in full implementation) ... */}
         {/* CATALOG MODAL */}
         {modalType === 'catalog' && (
             <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -1191,6 +1200,7 @@ export const Sales = () => {
             </div>
         )}
         
+        {/* CLIENT MODAL */}
         {modalType === 'client' && (
             <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                 <div className="bg-white rounded-2xl w-full max-w-md h-[550px] shadow-2xl animate-in zoom-in duration-200 overflow-hidden flex flex-col relative mx-4">
