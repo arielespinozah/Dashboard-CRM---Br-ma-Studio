@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Calendar, Trash2, X, Edit3, CheckCircle2, Circle, Clock, Share2, ExternalLink, User, GripVertical, LayoutGrid, List as ListIcon, MoreHorizontal, ArrowRight, AlertCircle, Copy, Check, Lock, PieChart, PauseCircle, PlayCircle } from 'lucide-react';
 import { Project, Status, Priority, ProjectStage, Client, User as UserType, CalendarEvent, AuditLog } from '../types';

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { DollarSign, Users, Briefcase, TrendingUp, Plus, ShoppingBag, Share2, Clock, CheckCircle2, RefreshCw, Wallet, ArrowDown, Calendar as CalendarIcon, ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';

@@ -368,8 +368,11 @@ export const Sales = () => {
 
                                     {/* Right Aligned Container with Centered Badge Text - FIXED */}
                                     {saleData.showCustomLabel && saleData.customLabel && (
-                                        <div className="flex justify-end mt-2">
-                                            <div className="flex items-center justify-center text-xs font-bold text-red-600 uppercase tracking-widest px-3 py-1.5 border border-red-200 bg-red-50 rounded min-w-[100px] text-center">
+                                        <div className="relative mt-4 h-8"> {/* Contenedor relativo con altura fija */}
+                                            <div 
+                                                className="absolute bottom-0 right-0 text-xs font-bold text-red-600 uppercase tracking-widest px-3 py-1.5 border border-red-200 bg-red-50 rounded text-center"
+                                                style={{ position: 'absolute', bottom: '0', right: '0' }}
+                                            >
                                                 {saleData.customLabel}
                                             </div>
                                         </div>
@@ -591,20 +594,37 @@ export const Sales = () => {
         setTaxEnabled(false);
         setIsModalOpen(false);
 
-        // 2. Show Confirmation
-        setConfirmModal({
-            isOpen: true,
-            title: 'Venta Exitosa',
-            message: `La venta ${finalSale.id} se guardó correctamente.\n¿Desea imprimir el recibo ahora?`,
-            type: 'success',
-            confirmText: 'Imprimir',
-            cancelText: 'Solo Ver',
-            showCancel: true,
-            action: () => {
-                handleDirectAction(finalSale, 'print');
-                setConfirmModal(prev => ({...prev, isOpen: false}));
-            }
-        });
+        // 2. Show Confirmation with slight delay to ensure UI transition completes
+        setTimeout(() => {
+             setConfirmModal({
+                isOpen: true,
+                title: 'Venta Exitosa',
+                message: `La venta ${finalSale.id} se guardó correctamente.\n¿Qué acción desea realizar?`,
+                type: 'success',
+                confirmText: 'Imprimir Comprobante',
+                cancelText: 'Concluir Venta',
+                showCancel: true,
+                action: () => {
+                    handleDirectAction(finalSale, 'print');
+                    setConfirmModal(prev => ({...prev, isOpen: false}));
+                }
+            });
+        }, 300);
+    };
+
+    const executeQuickPay = (sale: Sale) => {
+        console.log("Ejecutando pago completo para", sale.id);
+        const updatedSale: Sale = {
+            ...sale,
+            amountPaid: sale.total,
+            balance: 0,
+            paymentStatus: 'Paid'
+        };
+        const updatedSales = sales.map(s => s.id === sale.id ? updatedSale : s);
+        syncSalesToCloud(updatedSales);
+        setSelectedSale(updatedSale);
+        if (currentUser) logAuditAction('Update', `Completó pago venta ${sale.id}`, currentUser);
+        setConfirmModal(prev => ({ ...prev, isOpen: false })); // Cerrar el modal de confirmación
     };
 
     useEffect(() => {
@@ -927,7 +947,7 @@ export const Sales = () => {
                                             <span className="text-xs text-gray-500">{currentCurrency}</span>
                                             <input
                                                 type="number"
-                                                className="w-24 text-right border border-gray-300 rounded px-2 py-1 text-sm font-bold text-brand-900 outline-none focus:border-brand-500"
+                                                className="w-24 text-right border border-gray-300 rounded px-2 py-1 text-sm font-bold text-brand-900 outline-none focus:border-brand-500 bg-white"
                                                 value={newSale.amountPaid || ''}
                                                 onChange={(e) => {
                                                     const val = Number(e.target.value);
@@ -1148,7 +1168,7 @@ export const Sales = () => {
                         <div className="p-5 border-b border-gray-100 bg-gray-50 flex justify-between items-center pt-safe-top">
                             <div>
                                 <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                                    {selectedSale.id}
+                                    {selectedSale.id.replace('VENT-', '')}
                                     <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase border ${selectedSale.paymentStatus === 'Paid' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-orange-100 text-orange-700 border-orange-200'}`}>{selectedSale.paymentStatus === 'Paid' ? 'Pagado' : 'Pendiente'}</span>
                                 </h3>
                                 <p className="text-sm text-gray-500">{new Date(selectedSale.date).toLocaleDateString()} • {selectedSale.clientName}</p>
@@ -1180,11 +1200,32 @@ export const Sales = () => {
                                 <div className="flex justify-between text-2xl font-black text-brand-900 pt-2 border-t border-gray-200 mt-2"><span>Total</span><span>{formatCurrency(selectedSale.total, currentCurrency)}</span></div>
                             </div>
                         </div>
-                        <div className="p-4 bg-white border-t border-gray-200 grid grid-cols-2 gap-3 pb-safe-area shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-                            <button onClick={() => { setPdfPreview(selectedSale); setModalType('preview'); }} className="flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-colors shadow-sm min-h-[48px]"><Eye size={18}/> Ver PDF</button>
-                            <button onClick={() => setModalType('share')} className="flex items-center justify-center gap-2 py-3 bg-green-50 text-green-700 border border-green-100 font-bold rounded-xl hover:bg-green-100 transition-colors shadow-sm min-h-[48px]"><Share2 size={18}/> Compartir</button>
-                            <button onClick={() => handleEditSale(selectedSale)} className="flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-blue-600 font-bold rounded-xl hover:bg-blue-50 transition-colors shadow-sm min-h-[48px]"><Edit3 size={18}/> Editar</button>
-                            <button onClick={() => confirmDeleteSale(selectedSale)} className="flex items-center justify-center gap-2 py-3 bg-white border border-red-100 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors shadow-sm min-h-[48px]"><Trash2 size={18}/> Eliminar</button>
+                        <div className="p-4 bg-white border-t border-gray-200 flex flex-col gap-3 pb-safe-area shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+                            {selectedSale.paymentStatus !== 'Paid' && (
+                                <button 
+                                    onClick={() => {
+                                        setConfirmModal({
+                                            isOpen: true,
+                                            title: 'Completar Pago',
+                                            message: `¿Confirmar pago total de ${formatCurrency(selectedSale.balance, currentCurrency)} para la venta ${selectedSale.id}?`,
+                                            type: 'info',
+                                            confirmText: 'Sí, Completar',
+                                            cancelText: 'Cancelar',
+                                            showCancel: true,
+                                            action: () => executeQuickPay(selectedSale)
+                                        });
+                                    }}
+                                    className="w-full py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-md flex items-center justify-center gap-2 transition-colors active:scale-95"
+                                >
+                                    <DollarSign size={20}/> Completar Pago (Bs. {selectedSale.balance.toFixed(2)})
+                                </button>
+                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onClick={() => { setPdfPreview(selectedSale); setModalType('preview'); }} className="flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-colors shadow-sm min-h-[48px]"><Eye size={18}/> Ver PDF</button>
+                                <button onClick={() => setModalType('share')} className="flex items-center justify-center gap-2 py-3 bg-green-50 text-green-700 border border-green-100 font-bold rounded-xl hover:bg-green-100 transition-colors shadow-sm min-h-[48px]"><Share2 size={18}/> Compartir</button>
+                                <button onClick={() => handleEditSale(selectedSale)} className="flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-blue-600 font-bold rounded-xl hover:bg-blue-50 transition-colors shadow-sm min-h-[48px]"><Edit3 size={18}/> Editar</button>
+                                <button onClick={() => confirmDeleteSale(selectedSale)} className="flex items-center justify-center gap-2 py-3 bg-white border border-red-100 text-red-600 font-bold rounded-xl hover:bg-red-50 transition-colors shadow-sm min-h-[48px]"><Trash2 size={18}/> Eliminar</button>
+                            </div>
                         </div>
                     </div>
                 </div>

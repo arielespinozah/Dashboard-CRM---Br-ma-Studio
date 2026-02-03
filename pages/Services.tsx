@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid, DollarSign, RefreshCw, Layers, ChevronRight, List as ListIcon, LayoutGrid, MoreHorizontal, AlertCircle, ArrowLeft, ChevronDown } from 'lucide-react';
 import { Category, InventoryItem, User } from '../types';

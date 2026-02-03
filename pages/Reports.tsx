@@ -310,6 +310,7 @@ export const Reports = () => {
                 </div>
             )}
 
+            {/* Audit Logs */}
             {activeTab === 'Audit' && (
                 <div className="space-y-6 animate-in fade-in">
                     <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col gap-4">

@@ -431,83 +431,26 @@ export const Communications = () => {
                                 <div className="flex-1 overflow-y-auto p-2 space-y-1 pb-safe-area">
                                     {showActionPanel === 'templates' && (
                                         <>
-                                            <button onClick={() => { setIsTemplateModalOpen(true); setShowActionPanel('none'); }} className="w-full text-center py-3 text-sm font-bold text-brand-900 hover:bg-brand-50 rounded-xl border-2 border-dashed border-brand-200 mb-3 min-h-[48px]">+ Gestionar Plantillas</button>
+                                            <button onClick={() => { setIsTemplateModalOpen(true); setShowActionPanel('none'); }} className="w-full text-center py-3 text-sm font-bold text-brand-900 hover:bg-brand-50 rounded-xl border-2 border-dashed border-brand-200 mb-3 min-h-[48px]">+ Nueva Plantilla</button>
                                             {templates.map(t => (
-                                                <button key={t.id} onClick={() => applyTemplate(t.content)} className="w-full text-left p-4 hover:bg-gray-50 rounded-xl text-sm text-gray-700 border border-gray-100 hover:border-gray-200 transition-colors shadow-sm mb-2">
-                                                    <span className="font-bold block text-sm text-brand-900 mb-1">{t.name}</span>
+                                                <button key={t.id} onClick={() => applyTemplate(t.content)} className="w-full text-left p-3 hover:bg-gray-50 rounded-xl border border-gray-100 active:scale-[0.99] transition-transform">
+                                                    <span className="font-bold text-sm text-gray-900 block mb-1">{t.name}</span>
                                                     <span className="text-xs text-gray-500 line-clamp-2">{t.content}</span>
                                                 </button>
                                             ))}
                                         </>
                                     )}
                                     {showActionPanel === 'quotes' && clientQuotes.map(q => (
-                                        <button key={q.id} onClick={() => attachLink('quote', q.id, '')} className="w-full text-left p-4 hover:bg-gray-50 rounded-xl flex justify-between items-center border border-gray-100 shadow-sm mb-2 min-h-[60px]">
-                                            <div><p className="font-bold text-sm text-gray-900">{q.id}</p><p className="text-xs text-gray-500">{new Date(q.date).toLocaleDateString()}</p></div>
-                                            <span className="font-bold text-sm text-green-600">Bs. {q.total}</span>
+                                        <button key={q.id} onClick={() => attachLink('quote', q.id, '')} className="w-full text-left p-3 hover:bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center active:scale-[0.99] transition-transform">
+                                            <div>
+                                                <span className="font-bold text-sm text-gray-900 block">Cotización {q.id}</span>
+                                                <span className="text-xs text-gray-500">{new Date(q.date).toLocaleDateString()} • Total: {q.total}</span>
+                                            </div>
+                                            <LinkIcon size={16} className="text-gray-400"/>
                                         </button>
                                     ))}
                                     {showActionPanel === 'sales' && clientSales.map(s => (
-                                        <button key={s.id} onClick={() => attachLink('sale', s.id, '')} className="w-full text-left p-4 hover:bg-gray-50 rounded-xl flex justify-between items-center border border-gray-100 shadow-sm mb-2 min-h-[60px]">
-                                            <div><p className="font-bold text-sm text-gray-900">{s.id}</p><p className="text-xs text-gray-500">{new Date(s.date).toLocaleDateString()}</p></div>
-                                            <span className="font-bold text-sm text-green-600">Bs. {s.total}</span>
-                                        </button>
-                                    ))}
-                                    {showActionPanel === 'products' && inventory.filter(i => i.type === 'Product').map(i => (
-                                        <button key={i.id} onClick={() => attachLink('item', `${i.price}`, `Producto: ${i.name}`)} className="w-full text-left p-4 hover:bg-gray-50 rounded-xl flex justify-between items-center border border-gray-100 shadow-sm mb-2 min-h-[60px]">
-                                            <div><p className="font-bold text-sm text-gray-900">{i.name}</p><p className="text-xs text-gray-500">Stock: {i.quantity}</p></div>
-                                            <span className="font-bold text-sm text-green-600">Bs. {i.price}</span>
-                                        </button>
-                                    ))}
-                                    
-                                    {(showActionPanel !== 'templates' && showActionPanel !== 'products' && (!clientQuotes.length && !clientSales.length)) && (
-                                        <div className="p-8 text-center text-sm text-gray-400 flex flex-col items-center">
-                                            <AlertCircle size={32} className="mb-2 opacity-50"/>
-                                            No hay registros recientes para este cliente.
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Input Footer */}
-                        <div className="bg-[#f0f2f5] p-2 flex flex-col gap-2 border-t border-gray-200 pb-safe-area">
-                            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide px-1 pt-1">
-                                <button onClick={() => setShowActionPanel('templates')} className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-white rounded-full text-xs font-bold text-gray-700 shadow-sm border border-gray-200 active:scale-95 transition-transform min-h-[40px]"><Zap size={14} className="text-yellow-500"/> Plantillas</button>
-                                <button onClick={() => setShowActionPanel('quotes')} className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-white rounded-full text-xs font-bold text-gray-700 shadow-sm border border-gray-200 active:scale-95 transition-transform min-h-[40px]"><FileText size={14} className="text-blue-500"/> Cotizaciones</button>
-                                <button onClick={() => setShowActionPanel('sales')} className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-white rounded-full text-xs font-bold text-gray-700 shadow-sm border border-gray-200 active:scale-95 transition-transform min-h-[40px]"><DollarSign size={14} className="text-green-500"/> Recibos</button>
-                                <button onClick={() => setShowActionPanel('products')} className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-white rounded-full text-xs font-bold text-gray-700 shadow-sm border border-gray-200 active:scale-95 transition-transform min-h-[40px]"><ShoppingBag size={14} className="text-orange-500"/> Productos</button>
-                            </div>
-                            
-                            <div className="flex items-end gap-2 bg-white rounded-2xl p-2 border border-gray-200 shadow-sm">
-                                <button className="p-2.5 text-gray-400 hover:text-gray-600 min-h-[44px] min-w-[44px] flex items-center justify-center"><Paperclip size={22}/></button>
-                                <textarea 
-                                    className="flex-1 max-h-32 min-h-[44px] bg-transparent outline-none text-base resize-none py-2.5 text-gray-900 placeholder-gray-400"
-                                    placeholder="Escribe un mensaje"
-                                    rows={1}
-                                    value={messageText}
-                                    onChange={e => setMessageText(e.target.value)}
-                                    onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }}}
-                                />
-                                <button onClick={handleSendMessage} disabled={isSending || !messageText.trim()} className="p-3 rounded-full bg-brand-900 text-white hover:bg-brand-800 disabled:opacity-50 transition-colors shadow-md min-h-[44px] min-w-[44px] flex items-center justify-center">
-                                    {isSending ? <RefreshCw size={20} className="animate-spin"/> : <Send size={20} className="ml-0.5"/>}
-                                </button>
-                            </div>
-                        </div>
-                    </>
-                ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8 text-center bg-[#f0f2f5] border-b-8 border-green-500 min-h-screen">
-                        <div className="w-32 h-32 md:w-48 md:h-48 bg-[url('https://static.whatsapp.net/rsrc.php/v3/yO/r/FsWUqRoOsPu.png')] bg-contain bg-no-repeat bg-center opacity-50 mb-6"></div>
-                        <h2 className="text-xl md:text-2xl font-light text-gray-600 mb-2">Central de Comunicaciones</h2>
-                        <p className="text-sm text-gray-500 max-w-md">
-                            Envía y registra mensajes a tus clientes. 
-                            <br/>Conecta la API de Meta para envíos directos o usa el modo Web.
-                        </p>
-                        <div className="flex gap-2 mt-6 text-xs text-gray-400 bg-white/50 px-3 py-1.5 rounded-full">
-                            <span className="flex items-center gap-1"><Lock size={12}/> Cifrado de extremo a extremo (vía WhatsApp)</span>
-                        </div>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
+                                        <button key={s.id} onClick={() => attachLink('sale', s.id, '')} className="w-full text-left p-3 hover:bg-gray-50 rounded-xl border border-gray-100 flex justify-between items-center active:scale-[0.99] transition-transform">
+                                            <div>
+                                                <span className="font-bold text-sm text-gray-900 block">Venta {s.id}</span>
+                                                <span className="text-xs text-gray-5

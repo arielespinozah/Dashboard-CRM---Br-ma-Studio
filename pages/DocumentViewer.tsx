@@ -42,8 +42,7 @@ const Decenas = (num: number) => {
         case 7: return DecenasY("SETENTA", unidad);
         case 8: return DecenasY("OCHENTA", unidad);
         case 9: return DecenasY("NOVENTA", unidad);
-        case 0: return Unidades(unidad);
-        default: return "";
+        default: return Unidades(unidad);
     }
 };
 const DecenasY = (strSin: string, numUnidades: number) => { if (numUnidades > 0) return strSin + " Y " + Unidades(numUnidades); return strSin; };

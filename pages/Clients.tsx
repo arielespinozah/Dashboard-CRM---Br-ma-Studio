@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Users, Search, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, RefreshCw, ChevronRight, Check, Briefcase, ShoppingBag, Upload, Download, FileSpreadsheet, CreditCard, AlertTriangle, TrendingUp, MoreHorizontal } from 'lucide-react';
 import { Client, Sale, AppSettings, Project, User as UserType, AuditLog } from '../types';
@@ -567,7 +566,7 @@ export const Clients = () => {
                  <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Empresa</label><input type="text" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.company} onChange={e => setFormData({...formData, company: e.target.value})} /></div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                 <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">{settings?.taxIdLabel || 'NIT'}</label><input type="text" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.nit} onChange={e => setFormData({...formData, nit: e.target.value})} /></div>
+                 <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">{settings?.taxIdLabel || 'NIT'}</label><input type="text" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.nit} onChange={e => setFormData({...formData,nit: e.target.value})} /></div>
                  <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Teléfono</label><input type="text" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} /></div>
               </div>
               <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Email</label><input type="email" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>

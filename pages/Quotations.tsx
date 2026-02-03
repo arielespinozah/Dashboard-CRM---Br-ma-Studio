@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Trash2, Edit3, Package, Download, Share2, Copy, Calendar as CalendarIcon, Check, Eye, ShoppingCart, X, RefreshCw, FileText, ChevronRight, ChevronDown, Printer } from 'lucide-react';
 import { Quote, QuoteItem, AppSettings, Client, InventoryItem, User as UserType, AuditLog, Sale } from '../types';
