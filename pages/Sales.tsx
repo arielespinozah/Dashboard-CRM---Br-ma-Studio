@@ -275,19 +275,19 @@ export const Sales = () => {
                     <div className="flex justify-between mb-8 text-sm border-b border-gray-100 pb-8">
                         <div className="w-[45%]">
                             <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">Recibí de:</p>
-                            <h3 className="text-xl font-bold text-gray-900 mb-1 leading-tight">{saleData.clientName}</h3>
-                            <div className="text-gray-600 text-xs mt-1 space-y-1">
-                                {(() => {
-                                    const c = clients.find(cl => cl.name === saleData.clientName);
-                                    return (
-                                        <>
-                                            {c?.company && <div>{c.company}</div>}
+                            <h3 className="text-xl font-bold text-gray-900 leading-tight">{saleData.clientName}</h3>
+                            {(() => {
+                                const c = clients.find(cl => cl.name === saleData.clientName);
+                                return (
+                                    <div className="text-gray-600 text-xs mt-1">
+                                        {c?.company && <div className="font-bold text-gray-700 text-sm mb-1">{c.company}</div>}
+                                        <div className="space-y-0.5">
                                             {c?.nit && <div>{settings?.taxIdLabel || 'NIT'}: {c.nit}</div>}
                                             {c?.phone && <div>{c.phone}</div>}
-                                        </>
-                                    );
-                                })()}
-                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                         </div>
                         <div className="w-[45%] text-right">
                             <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">Emitido Por</p>
@@ -1171,7 +1171,10 @@ export const Sales = () => {
                                     {selectedSale.id.replace('VENT-', '')}
                                     <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase border ${selectedSale.paymentStatus === 'Paid' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-orange-100 text-orange-700 border-orange-200'}`}>{selectedSale.paymentStatus === 'Paid' ? 'Pagado' : 'Pendiente'}</span>
                                 </h3>
-                                <p className="text-sm text-gray-500">{new Date(selectedSale.date).toLocaleDateString()} • {selectedSale.clientName}</p>
+                                <div className="mt-1">
+                                    <p className="text-base font-bold text-gray-800 leading-tight">{selectedSale.clientName}</p>
+                                    <p className="text-xs text-gray-500 mt-0.5">{new Date(selectedSale.date).toLocaleString()}</p>
+                                </div>
                             </div>
                             <button onClick={() => setModalType('none')} className="p-2 hover:bg-gray-200 rounded-full text-gray-500"><X size={24}/></button>
                         </div>

@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, Plus, Trash2, Edit3, Package, Download, Share2, Copy, Calendar as CalendarIcon, Check, Eye, ShoppingCart, X, RefreshCw, FileText, ChevronRight, ChevronDown, Printer } from 'lucide-react';
 import { Quote, QuoteItem, AppSettings, Client, InventoryItem, User as UserType, AuditLog, Sale } from '../types';
@@ -588,11 +589,13 @@ export const Quotations = () => {
                     {(() => {
                         const client = getClientDetails(quoteData.clientName);
                         return (
-                            <div className="text-gray-600 text-xs mt-1 space-y-1 leading-relaxed">
-                                {client?.company && <div className="font-medium">{client.company}</div>}
-                                {client?.nit && <div>NIT/CI: {client.nit}</div>}
-                                {quoteData.clientEmail && <div>{quoteData.clientEmail}</div>}
-                                {client?.phone && <div>{client.phone}</div>}
+                            <div className="text-gray-600 text-xs mt-1 leading-relaxed">
+                                {client?.company && <div className="font-bold text-gray-700 text-sm mb-1">{client.company}</div>}
+                                <div className="space-y-0.5">
+                                    {client?.nit && <div>NIT/CI: {client.nit}</div>}
+                                    {quoteData.clientEmail && <div>{quoteData.clientEmail}</div>}
+                                    {client?.phone && <div>{client.phone}</div>}
+                                </div>
                             </div>
                         );
                     })()}
