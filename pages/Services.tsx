@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid, DollarSign, RefreshCw, Layers, ChevronRight, List as ListIcon, LayoutGrid, MoreHorizontal, AlertCircle } from 'lucide-react';
+import { Package, Search, Plus, Filter, Edit3, Trash2, Tag, Copy, Share2, X, Save, Briefcase, Check, Grid, DollarSign, RefreshCw, Layers, ChevronRight, List as ListIcon, LayoutGrid, MoreHorizontal, AlertCircle, ArrowLeft, ChevronDown } from 'lucide-react';
 import { Category, InventoryItem, User } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
@@ -31,7 +32,6 @@ export const Services = () => {
   const canManage = currentUser?.role === 'Admin' || currentUser?.permissions?.includes('all') || currentUser?.permissions?.includes('manage_inventory');
 
   const [activeTab, setActiveTab] = useState<'Service' | 'Product'>('Service');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -41,7 +41,7 @@ export const Services = () => {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null); // For Drawer
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null); 
   
   const [formData, setFormData] = useState<Partial<InventoryItem>>({
       name: '', description: '', price: 0, category: '', quantity: 0, priceDozen: 0, priceBox: 0, priceWholesale: 0, sku: ''
@@ -55,13 +55,13 @@ export const Services = () => {
           try {
               const catSnap = await getDoc(doc(db, 'crm_data', 'categories'));
               if(catSnap.exists()) {
-                  const list = catSnap.data().list;
+                  const list = (catSnap.data() as any).list;
                   setCategories(list);
                   localStorage.setItem('crm_categories', JSON.stringify(list));
               }
               const itemSnap = await getDoc(doc(db, 'crm_data', 'inventory'));
               if(itemSnap.exists()) {
-                  const list = itemSnap.data().list;
+                  const list = (itemSnap.data() as any).list;
                   setItems(list);
                   localStorage.setItem('crm_inventory', JSON.stringify(list));
               }
@@ -98,7 +98,7 @@ export const Services = () => {
 
   const handleDelete = (id: string, e?: React.MouseEvent) => {
       e?.stopPropagation();
-      if(confirm('¿Eliminar ítem del catálogo permanentemente?')) {
+      if(confirm('¿Eliminar ítem permanentemente?')) {
           setItems(prev => prev.filter(i => i.id !== id));
           if(selectedItem?.id === id) setSelectedItem(null);
       }
@@ -110,11 +110,9 @@ export const Services = () => {
       const qty = Number(formData.quantity) || 0;
       const price = Number(formData.price) || 0;
 
-      // Logic Check
       if (price < 0) { alert("El precio no puede ser negativo."); return; }
       if (!formData.name) { alert("El nombre es requerido"); return; }
       
-      // Auto-generate SKU if empty
       let finalSku = formData.sku;
       if (!finalSku) {
           const randomSuffix = Math.floor(Math.random() * 9000) + 1000;
@@ -122,9 +120,8 @@ export const Services = () => {
           finalSku = `${activeTab.substring(0,3).toUpperCase()}-${randomSuffix}${timestampSuffix}`;
       }
 
-      // Check Duplicates
       if (checkSkuDuplicate(finalSku, editingId)) {
-          alert(`Error: El código SKU "${finalSku}" ya está en uso por otro producto. Elija otro.`);
+          alert(`Error: SKU "${finalSku}" ya existe.`);
           return;
       }
       
@@ -150,22 +147,14 @@ export const Services = () => {
   const openNew = () => {
       const availableCategories = categories.filter(c => c.type === activeTab);
       if (availableCategories.length === 0) {
-          alert(`Primero debes crear una Categoría para ${activeTab === 'Service' ? 'Servicios' : 'Productos'}.`);
+          alert(`Crea una categoría primero.`);
           setIsCategoryModalOpen(true);
           return;
       }
 
       setEditingId(null);
       setFormData({ 
-          name: '', 
-          description: '', 
-          price: 0, 
-          category: availableCategories[0]?.name || '', 
-          quantity: 0, 
-          priceDozen: 0, 
-          priceBox: 0, 
-          priceWholesale: 0,
-          sku: ''
+          name: '', description: '', price: 0, category: availableCategories[0]?.name || '', quantity: 0, priceDozen: 0, priceBox: 0, priceWholesale: 0, sku: ''
       });
       setIsModalOpen(true);
   };
@@ -185,13 +174,8 @@ export const Services = () => {
 
   const handleDeleteCategory = (categoryId: string, categoryName: string) => {
       const isUsed = items.some(i => i.category === categoryName && i.type === activeTab);
-      
-      if (isUsed) {
-          alert(`No se puede eliminar la categoría "${categoryName}" porque hay ítems asignados a ella. Por favor, reasigna o elimina los ítems primero.`);
-          return;
-      }
-
-      if (confirm(`¿Eliminar la categoría "${categoryName}"?`)) {
+      if (isUsed) { alert(`Categoría en uso.`); return; }
+      if (confirm(`¿Eliminar "${categoryName}"?`)) {
           setCategories(prev => prev.filter(c => c.id !== categoryId));
       }
   };
@@ -199,35 +183,26 @@ export const Services = () => {
   const formatShareText = (item: InventoryItem) => {
       const lines = [
           `✨ *${item.name}* ✨`,
+          item.description || '',
           '',
-          item.description || 'Sin descripción',
-          '',
-          `🏷️ *Categoría:* ${item.category}`,
-          `💰 *Precio Unitario:* Bs. ${item.price}`,
+          `💰 *Precio:* Bs. ${item.price}`,
       ];
-      if(item.priceDozen) lines.push(`📦 *Precio A:* Bs. ${item.priceDozen} c/u`);
-      if(item.priceBox) lines.push(`📦 *Precio B:* Bs. ${item.priceBox} c/u`);
-      if(item.priceWholesale) lines.push(`🏭 *Precio C:* Bs. ${item.priceWholesale} c/u`);
-      
-      if(item.type === 'Product') lines.push(`📦 *Stock:* ${item.quantity} u.`);
-
+      if(item.priceDozen) lines.push(`📦 *x12:* Bs. ${item.priceDozen} c/u`);
       lines.push('');
-      lines.push('📍 *Bráma Studio* - Soluciones Creativas');
+      lines.push('📍 *Bráma Studio*');
       return lines.join('\n');
   };
 
   const handleCopy = (item: InventoryItem, e?: React.MouseEvent) => {
       e?.stopPropagation();
-      const text = formatShareText(item);
-      navigator.clipboard.writeText(text);
+      navigator.clipboard.writeText(formatShareText(item));
       setCopiedId(item.id);
       setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleWhatsAppShare = (item: InventoryItem, e?: React.MouseEvent) => {
       e?.stopPropagation();
-      const text = formatShareText(item);
-      const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+      const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(formatShareText(item))}`;
       window.open(url, '_blank');
   };
 
@@ -241,339 +216,224 @@ export const Services = () => {
   });
 
   return (
-    <div className="space-y-6 h-full flex flex-col relative pb-safe-area">
+    <div className="space-y-3 md:space-y-6 h-full flex flex-col relative pb-safe-area bg-[#f4f6f7]">
        {/* Header */}
-       <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+       <div className="flex flex-row md:flex-row justify-between items-center gap-3 bg-white p-3 md:p-4 rounded-2xl border border-gray-200 shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Catálogo</h1>
-          <p className="text-sm text-gray-500">Administra y comparte</p>
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900 tracking-tight">Catálogo</h1>
+          <p className="text-xs md:text-sm text-gray-500">Productos y servicios</p>
         </div>
         <div className="flex items-center gap-2">
-            {!isLoaded && <span className="text-xs text-brand-900 flex items-center gap-1 hidden sm:flex"><RefreshCw className="animate-spin" size={12}/> Sync</span>}
+            {!isLoaded && <RefreshCw className="animate-spin text-brand-900" size={16}/>}
             
-            <div className="flex bg-gray-100 p-1 rounded-xl">
-                <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><LayoutGrid size={18}/></button>
-                <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow text-brand-900' : 'text-gray-500 hover:text-gray-900'}`}><ListIcon size={18}/></button>
-            </div>
-
-            <button onClick={() => setIsCategoryModalOpen(true)} className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors hidden sm:flex">
-                <Grid size={16} /> <span className="hidden sm:inline">Categorías</span>
+            <button onClick={() => setIsCategoryModalOpen(true)} className="p-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors shadow-sm active:scale-95">
+                <Grid size={20} />
             </button>
             {canManage && (
-                <button onClick={openNew} disabled={!isLoaded} className="flex items-center gap-2 px-4 py-2 bg-brand-900 text-white rounded-xl text-sm font-medium hover:bg-brand-800 shadow-lg transition-all active:scale-95 disabled:opacity-50">
-                    <Plus size={18} /> <span className="hidden sm:inline">Nuevo</span>
+                <button onClick={openNew} disabled={!isLoaded} className="flex items-center gap-2 px-4 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-bold hover:bg-brand-800 shadow-lg active:scale-95 transition-all disabled:opacity-50">
+                    <Plus size={20} /> <span className="hidden xs:inline">Nuevo</span>
                 </button>
             )}
         </div>
       </div>
 
       {/* Tabs & Filter */}
-      <div className="flex flex-col md:flex-row gap-4 justify-between items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm">
-          <div className="flex p-1 bg-gray-100 rounded-lg w-full md:w-auto">
-              <button onClick={() => { setActiveTab('Service'); setSelectedCategory('All'); }} className={`flex-1 md:flex-none px-6 py-1.5 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'Service' ? 'bg-white text-brand-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                  <Briefcase size={16}/> Servicios
+      <div className="flex flex-col gap-2 bg-white p-2 rounded-xl border border-gray-200 shadow-sm sticky top-0 z-20 md:static">
+          <div className="flex p-1 bg-gray-100 rounded-lg">
+              <button onClick={() => { setActiveTab('Service'); setSelectedCategory('All'); }} className={`flex-1 px-2 py-2 rounded-md text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'Service' ? 'bg-white text-brand-900 shadow-sm' : 'text-gray-500'}`}>
+                  <Briefcase size={14}/> Servicios
               </button>
-              <button onClick={() => { setActiveTab('Product'); setSelectedCategory('All'); }} className={`flex-1 md:flex-none px-6 py-1.5 rounded-md text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'Product' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-orange-600'}`}>
-                  <Package size={16}/> Productos
+              <button onClick={() => { setActiveTab('Product'); setSelectedCategory('All'); }} className={`flex-1 px-2 py-2 rounded-md text-xs md:text-sm font-bold transition-all flex items-center justify-center gap-2 ${activeTab === 'Product' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500'}`}>
+                  <Package size={14}/> Productos
               </button>
           </div>
-          <div className="flex gap-2 w-full md:w-auto">
-              <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} className="px-3 py-2 bg-white border border-transparent focus:bg-white focus:border-brand-200 rounded-lg text-sm outline-none transition-all text-gray-700 cursor-pointer">
-                  <option value="All" className="bg-white text-gray-900">Todas</option>
-                  {categories.filter(c => c.type === activeTab).map(c => <option key={c.id} value={c.name} className="bg-white text-gray-900">{c.name}</option>)}
-              </select>
-              <div className="relative flex-1 md:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Buscar..." className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-transparent focus:bg-white focus:border-brand-200 rounded-lg text-sm outline-none transition-all"/>
+          
+          <div className="flex gap-2">
+              <div className="relative w-1/3 md:w-auto min-w-[100px]">
+                  <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} className="w-full appearance-none pl-3 pr-6 py-2.5 border border-gray-200 rounded-xl text-xs font-bold outline-none text-gray-700 bg-gray-50 truncate">
+                      <option value="All">Todas</option>
+                      {categories.filter(c => c.type === activeTab).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  </select>
+                  <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={14}/>
+              </div>
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Buscar..." className="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-transparent focus:bg-white focus:border-brand-900 rounded-xl text-xs md:text-sm outline-none transition-all"/>
               </div>
           </div>
       </div>
 
-      {/* CONTENT AREA */}
-      <div className="flex-1 overflow-y-auto pb-20">
-          {viewMode === 'list' ? (
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead className="bg-gray-50/50 border-b border-gray-100">
-                            <tr>
-                                <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Nombre / SKU</th>
-                                <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase">Categoría</th>
-                                <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase text-right">Precio Unit.</th>
-                                {activeTab === 'Product' && <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase text-center">Stock</th>}
-                                <th className="px-6 py-3 text-xs font-bold text-gray-500 uppercase text-right">Acciones</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-50">
-                            {filteredItems.map(item => (
-                                <tr key={item.id} onClick={() => setSelectedItem(item)} className={`hover:bg-gray-50 cursor-pointer transition-colors ${selectedItem?.id === item.id ? 'bg-brand-50/30' : ''}`}>
-                                    <td className="px-6 py-4">
-                                        <p className="font-bold text-gray-900 text-sm">{item.name}</p>
-                                        <p className="text-xs text-gray-400 font-mono mt-0.5">{item.sku}</p>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-bold uppercase">{item.category}</span>
-                                    </td>
-                                    <td className="px-6 py-4 text-right">
-                                        <span className="font-mono font-bold text-brand-900 text-sm">Bs. {item.price}</span>
-                                    </td>
-                                    {activeTab === 'Product' && (
-                                        <td className="px-6 py-4 text-center">
-                                            <span className={`text-xs font-bold px-2 py-1 rounded-full ${item.quantity <= (item.minStock || 5) ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
-                                                {item.quantity} u.
-                                            </span>
-                                        </td>
-                                    )}
-                                    <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                        <div className="flex justify-end gap-1">
-                                            <button onClick={(e) => handleWhatsAppShare(item, e)} className="p-1.5 text-green-600 hover:bg-green-50 rounded transition-colors" title="Compartir"><Share2 size={16}/></button>
-                                            <button onClick={(e) => handleCopy(item, e)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded transition-colors" title="Copiar">{copiedId === item.id ? <Check size={16} className="text-green-600"/> : <Copy size={16}/>}</button>
-                                            {canManage && (
-                                                <>
-                                                    <button onClick={(e) => handleEdit(item, e)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Editar"><Edit3 size={16}/></button>
-                                                    <button onClick={(e) => handleDelete(item.id, e)} className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Eliminar"><Trash2 size={16}/></button>
-                                                </>
-                                            )}
-                                            <button onClick={() => setSelectedItem(item)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors"><ChevronRight size={16}/></button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                            {filteredItems.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-gray-400 text-sm">No se encontraron ítems.</td></tr>}
-                        </tbody>
-                    </table>
-                  </div>
-              </div>
-          ) : (
-              // GRID VIEW
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {filteredItems.map(item => (
-                      <div key={item.id} onClick={() => setSelectedItem(item)} className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm hover:shadow-lg transition-all cursor-pointer group flex flex-col h-full relative hover:ring-1 hover:ring-brand-500/30">
-                          {/* Card Header */}
-                          <div className="flex justify-between items-start mb-3">
-                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider bg-gray-50 px-2 py-1 rounded border border-gray-100">{item.category}</span>
-                              <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                                  {canManage && (
-                                      <>
-                                          <button onClick={(e) => handleEdit(item, e)} className="p-1.5 bg-gray-50 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded-md transition-colors"><Edit3 size={14}/></button>
-                                          <button onClick={(e) => handleDelete(item.id, e)} className="p-1.5 bg-gray-50 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-md transition-colors"><Trash2 size={14}/></button>
-                                      </>
-                                  )}
+      {/* GRID CONTENT */}
+      <div className="flex-1 overflow-y-auto pb-20 min-h-0 px-0.5">
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 md:gap-6 pb-4">
+              {filteredItems.map(item => (
+                  <div key={item.id} onClick={() => setSelectedItem(item)} className="bg-white rounded-xl p-3 md:p-5 border border-gray-200 shadow-sm active:scale-[0.98] transition-transform cursor-pointer flex flex-col h-full relative overflow-hidden group">
+                      <div className="flex justify-between items-start mb-2">
+                          <span className="text-[9px] font-bold text-gray-500 uppercase bg-gray-100 px-1.5 py-0.5 rounded truncate max-w-[80px]">{item.category}</span>
+                          {/* Desktop Actions */}
+                          {canManage && (
+                              <div className="hidden md:flex gap-1">
+                                  <button onClick={(e) => handleEdit(item, e)} className="p-1 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded"><Edit3 size={12}/></button>
                               </div>
-                          </div>
-                          
-                          {/* Card Body */}
-                          <div className="flex-1 mb-4">
-                              <h3 className="font-bold text-gray-900 text-lg leading-tight mb-1 line-clamp-2">{item.name}</h3>
-                              <p className="text-xs text-gray-400 font-mono mb-2">{item.sku}</p>
-                              <p className="text-xs text-gray-500 line-clamp-2 h-8">{item.description || 'Sin descripción disponible.'}</p>
-                          </div>
+                          )}
+                      </div>
+                      
+                      <div className="flex-1 mb-2">
+                          <h3 className="font-bold text-gray-900 text-xs md:text-lg leading-tight mb-1 line-clamp-2">{item.name}</h3>
+                          <p className="text-[9px] text-gray-400 font-mono truncate">{item.sku}</p>
+                          {/* Descripcion oculta en movil */}
+                          {item.description && <p className="hidden md:block text-xs text-gray-500 mt-2 line-clamp-2">{item.description}</p>}
+                      </div>
 
-                          {/* Card Footer */}
-                          <div className="mt-auto border-t border-gray-100 pt-3 flex items-center justify-between">
-                              <div>
-                                  <p className="text-xs text-gray-400 font-bold uppercase mb-0.5">Precio</p>
-                                  <p className="text-lg font-bold text-brand-900">Bs. {item.price}</p>
-                              </div>
-                              <div className="flex flex-col items-end gap-2">
-                                  {activeTab === 'Product' && (
-                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.quantity <= (item.minStock || 5) ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
-                                          {item.quantity} u.
-                                      </span>
-                                  )}
-                                  <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                                      <button onClick={(e) => handleWhatsAppShare(item, e)} className="p-1.5 bg-green-50 text-green-600 hover:bg-green-100 rounded-lg transition-colors" title="Compartir"><Share2 size={16}/></button>
-                                      <button onClick={(e) => handleCopy(item, e)} className="p-1.5 bg-gray-50 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Copiar">{copiedId === item.id ? <Check size={16}/> : <Copy size={16}/>}</button>
-                                  </div>
+                      <div className="pt-2 border-t border-gray-50 flex flex-col md:flex-row md:items-center justify-between gap-1">
+                          <p className="text-sm md:text-lg font-bold text-brand-900">Bs. {item.price}</p>
+                          <div className="flex items-center justify-between md:flex-col md:items-end gap-2">
+                              {activeTab === 'Product' && (
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${item.quantity <= (item.minStock || 5) ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                                      Stock: {item.quantity}
+                                  </span>
+                              )}
+                              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <button onClick={(e) => handleWhatsAppShare(item, e)} className="p-1.5 bg-green-50 text-green-600 rounded-lg"><Share2 size={12} className="md:w-4 md:h-4"/></button>
+                                  <button onClick={(e) => handleCopy(item, e)} className="p-1.5 bg-gray-50 text-gray-600 rounded-lg"><Copy size={12} className="md:w-4 md:h-4"/></button>
                               </div>
                           </div>
                       </div>
-                  ))}
-                  {filteredItems.length === 0 && <div className="col-span-full text-center py-20 text-gray-400"><p>No se encontraron registros.</p></div>}
-              </div>
-          )}
+                  </div>
+              ))}
+              {filteredItems.length === 0 && <div className="col-span-full text-center py-12 text-gray-400 text-xs">No se encontraron registros.</div>}
+          </div>
       </div>
 
       {/* DETAILS DRAWER */}
       {selectedItem && (
-          <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-white shadow-2xl z-40 border-l border-gray-200 animate-in slide-in-from-right duration-300 flex flex-col">
-              <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex justify-between items-start">
-                  <div>
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1 block">{selectedItem.type === 'Service' ? 'Servicio' : 'Producto'}</span>
-                      <h2 className="text-xl font-bold text-gray-900 leading-tight">{selectedItem.name}</h2>
-                      <div className="flex items-center gap-2 mt-2">
-                          <span className="inline-block bg-brand-100 text-brand-900 px-2 py-0.5 rounded text-xs font-bold">{selectedItem.category}</span>
-                          <span className="text-xs text-gray-400 font-mono">{selectedItem.sku}</span>
-                      </div>
-                  </div>
-                  <button onClick={() => setSelectedItem(null)} className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-200 rounded-full"><X size={20}/></button>
-              </div>
-              
-              <div className="p-6 flex-1 overflow-y-auto space-y-6">
-                  <div>
-                      <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 border-b border-gray-100 pb-1">Descripción</h3>
-                      <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{selectedItem.description || 'Sin descripción detallada.'}</p>
-                  </div>
-
-                  <div>
-                      <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 border-b border-gray-100 pb-1">Tabla de Precios</h3>
-                      <div className="space-y-2">
-                          <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
-                              <span className="text-sm font-medium text-gray-700">Unitario</span>
-                              <span className="font-bold text-brand-900">Bs. {selectedItem.price}</span>
-                          </div>
-                          {selectedItem.priceDozen && selectedItem.priceDozen > 0 && (
-                              <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg border border-blue-100">
-                                  <span className="text-sm font-medium text-blue-800">Precio A</span>
-                                  <span className="font-bold text-blue-900">Bs. {selectedItem.priceDozen}</span>
-                              </div>
-                          )}
-                          {selectedItem.priceBox && selectedItem.priceBox > 0 && (
-                              <div className="flex justify-between items-center p-3 bg-orange-50 rounded-lg border border-orange-100">
-                                  <span className="text-sm font-medium text-orange-800">Precio B</span>
-                                  <span className="font-bold text-orange-900">Bs. {selectedItem.priceBox}</span>
-                              </div>
-                          )}
-                          {selectedItem.priceWholesale && selectedItem.priceWholesale > 0 && (
-                              <div className="flex justify-between items-center p-3 bg-purple-50 rounded-lg border border-purple-100">
-                                  <span className="text-sm font-medium text-purple-800">Precio C</span>
-                                  <span className="font-bold text-purple-900">Bs. {selectedItem.priceWholesale}</span>
-                              </div>
-                          )}
-                      </div>
-                  </div>
-
-                  {selectedItem.type === 'Product' && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
+             <div className="w-full md:w-[400px] bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+                  <div className="p-5 border-b border-gray-100 flex justify-between items-start pt-safe-top">
                       <div>
-                          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 border-b border-gray-100 pb-1">Inventario</h3>
-                          <div className="flex items-center gap-4">
-                              <div className="text-center p-3 bg-gray-50 rounded-lg border border-gray-100 flex-1">
-                                  <p className="text-xs text-gray-500">Stock Actual</p>
-                                  <p className={`text-xl font-bold ${selectedItem.quantity < 5 ? 'text-red-500' : 'text-gray-900'}`}>{selectedItem.quantity}</p>
-                              </div>
-                              <div className="text-center p-3 bg-gray-50 rounded-lg border border-gray-100 flex-1">
-                                  <p className="text-xs text-gray-500">Mínimo</p>
-                                  <p className="text-xl font-bold text-gray-700">{selectedItem.minStock || 5}</p>
-                              </div>
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1 block">{selectedItem.type === 'Service' ? 'Servicio' : 'Producto'}</span>
+                          <h2 className="text-lg font-bold text-gray-900 leading-tight">{selectedItem.name}</h2>
+                          <div className="flex items-center gap-2 mt-1">
+                              <span className="inline-block bg-brand-50 text-brand-900 px-2 py-0.5 rounded text-[10px] font-bold">{selectedItem.category}</span>
+                              <span className="text-[10px] text-gray-400 font-mono">{selectedItem.sku}</span>
                           </div>
                       </div>
-                  )}
-              </div>
+                      <button onClick={() => setSelectedItem(null)} className="text-gray-400 p-2 hover:bg-gray-100 rounded-full"><X size={20}/></button>
+                  </div>
+                  
+                  <div className="p-5 flex-1 overflow-y-auto space-y-6">
+                      {selectedItem.description && (
+                          <div>
+                              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 border-b border-gray-100 pb-1">Descripción</h3>
+                              <p className="text-sm text-gray-600 leading-relaxed">{selectedItem.description}</p>
+                          </div>
+                      )}
 
-              <div className="p-4 border-t border-gray-100 bg-gray-50/50 grid grid-cols-2 gap-3">
-                  <button onClick={() => handleWhatsAppShare(selectedItem)} className="flex items-center justify-center gap-2 py-2.5 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl transition-colors shadow-lg shadow-green-200">
-                      <Share2 size={18}/> Compartir
-                  </button>
-                  <button onClick={() => handleEdit(selectedItem)} className="flex items-center justify-center gap-2 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold rounded-xl transition-colors">
-                      <Edit3 size={18}/> Editar
-                  </button>
-              </div>
+                      <div>
+                          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 border-b border-gray-100 pb-1">Precios</h3>
+                          <div className="space-y-2">
+                              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                  <span className="text-xs font-medium text-gray-700">Unitario</span>
+                                  <span className="font-bold text-brand-900">Bs. {selectedItem.price}</span>
+                              </div>
+                              {selectedItem.priceDozen && selectedItem.priceDozen > 0 && (
+                                  <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg border border-blue-100">
+                                      <span className="text-xs font-medium text-blue-800">Precio A</span>
+                                      <span className="font-bold text-blue-900">Bs. {selectedItem.priceDozen}</span>
+                                  </div>
+                              )}
+                              {selectedItem.priceBox && selectedItem.priceBox > 0 && (
+                                  <div className="flex justify-between items-center p-3 bg-orange-50 rounded-lg border border-orange-100">
+                                      <span className="text-xs font-medium text-orange-800">Precio B</span>
+                                      <span className="font-bold text-orange-900">Bs. {selectedItem.priceBox}</span>
+                                  </div>
+                              )}
+                          </div>
+                      </div>
+
+                      {selectedItem.type === 'Product' && (
+                          <div className="p-4 bg-gray-50 rounded-xl text-center">
+                              <p className="text-xs text-gray-500 mb-1">Stock Disponible</p>
+                              <p className={`text-2xl font-black ${selectedItem.quantity < 5 ? 'text-red-500' : 'text-gray-900'}`}>{selectedItem.quantity}</p>
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 border-t border-gray-200 bg-white grid grid-cols-2 gap-3 pb-safe-area">
+                      <button onClick={() => handleWhatsAppShare(selectedItem)} className="flex items-center justify-center gap-2 py-3 bg-green-500 text-white font-bold rounded-xl shadow-lg shadow-green-200 min-h-[48px]">
+                          <Share2 size={18}/> Compartir
+                      </button>
+                      <button onClick={() => handleEdit(selectedItem)} className="flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl min-h-[48px]">
+                          <Edit3 size={18}/> Editar
+                      </button>
+                  </div>
+             </div>
           </div>
       )}
 
-      {/* Item Modal (WIDENED & IMPROVED) */}
+      {/* Item Modal */}
       {isModalOpen && canManage && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 overflow-y-auto">
-          {/* Changed max-w-lg to max-w-3xl for better space usage */}
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in duration-200 my-8">
-            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 sticky top-0 z-10">
-              <h3 className="font-semibold text-lg text-gray-900">{editingId ? 'Editar Ítem' : `Nuevo ${activeTab === 'Service' ? 'Servicio' : 'Producto'}`}</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm md:p-4 overflow-hidden">
+          <div className="bg-white w-full h-full md:h-auto md:max-h-[90vh] md:rounded-2xl md:max-w-3xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col shadow-2xl">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 pt-safe-top">
+              <h3 className="font-semibold text-lg text-gray-900">{editingId ? 'Editar' : 'Nuevo'}</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 p-2 rounded-full"><X size={24} /></button>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-6 space-y-6">
-               {/* Form Fields - 2 Column Layout for main details */}
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Nombre</label><input required className="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none bg-white text-gray-900 text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1.5">Nombre del Ítem</label>
-                      <input required type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900 transition-all focus:border-brand-900" 
-                          placeholder="Ej. Diseño de Logo Profesional"
-                          value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                   </div>
-                   <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1.5">Categoría</label>
+                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Categoría</label>
                       <div className="relative">
-                          <select required className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900 appearance-none cursor-pointer transition-all focus:border-brand-900" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
-                              {categories.filter(c => c.type === activeTab).map(c => <option key={c.id} value={c.name} className="bg-white text-gray-900">{c.name}</option>)}
+                          <select required className="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none bg-white text-gray-900 appearance-none text-sm" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+                              {categories.filter(c => c.type === activeTab).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                           </select>
-                          <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90 pointer-events-none" size={16}/>
+                          <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90" size={16}/>
                       </div>
                    </div>
                </div>
-               
-               <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1.5">SKU / Código</label>
-                  <input type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900 transition-all focus:border-brand-900 font-mono" 
-                      placeholder="Dejar en blanco para auto-generar"
-                      value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} />
-                  <p className="text-[10px] text-gray-400 mt-1">Debe ser único. Si se deja vacío, el sistema creará uno.</p>
-               </div>
-
-               <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1.5">Descripción Detallada</label>
-                  {/* Expanded Textarea with Resize enabled */}
-                  <textarea 
-                    className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-500/20 outline-none bg-white text-gray-900 min-h-[120px] resize-y transition-all focus:border-brand-900 leading-relaxed" 
-                    placeholder="Describe las características, entregables o detalles técnicos..."
-                    value={formData.description} 
-                    onChange={e => setFormData({...formData, description: e.target.value})} 
-                    rows={4}
-                  />
-               </div>
-               
-               <div className="bg-gray-50 p-5 rounded-2xl border border-gray-100">
-                   <h4 className="text-xs font-bold text-gray-500 uppercase mb-4 flex items-center gap-2 tracking-wider"><DollarSign size={14}/> Precios Escalonados</h4>
-                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                       <div><label className="block text-xs font-bold text-brand-900 mb-1.5">Precio Unitario</label><input required type="number" min="0" className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 font-bold focus:border-brand-900 outline-none" value={formData.price} onChange={e => setFormData({...formData, price: Number(e.target.value)})} /></div>
-                       <div><label className="block text-xs font-bold text-gray-500 mb-1.5">Precio A (Opcional)</label><input type="number" min="0" className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 focus:border-blue-500 outline-none" value={formData.priceDozen || ''} onChange={e => setFormData({...formData, priceDozen: Number(e.target.value)})} placeholder="0" /></div>
-                       <div><label className="block text-xs font-bold text-gray-500 mb-1.5">Precio B (Opcional)</label><input type="number" min="0" className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 focus:border-orange-500 outline-none" value={formData.priceBox || ''} onChange={e => setFormData({...formData, priceBox: Number(e.target.value)})} placeholder="0" /></div>
-                       <div><label className="block text-xs font-bold text-gray-500 mb-1.5">Precio C (Opcional)</label><input type="number" min="0" className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 outline-none" value={formData.priceWholesale || ''} onChange={e => setFormData({...formData, priceWholesale: Number(e.target.value)})} placeholder="0" /></div>
+               <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">SKU</label><input className="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none bg-white text-gray-900 text-sm" value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} placeholder="Opcional" /></div>
+               <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Descripción</label><textarea className="w-full px-4 py-3 border border-gray-200 rounded-xl outline-none bg-white text-gray-900 h-24 resize-none text-sm" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} /></div>
+               <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                   <h4 className="text-xs font-bold text-gray-500 uppercase mb-3">Precios</h4>
+                   <div className="grid grid-cols-2 gap-3">
+                       <div><label className="block text-[10px] font-bold uppercase mb-1">Unitario</label><input required type="number" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold" value={formData.price} onChange={e => setFormData({...formData, price: Number(e.target.value)})} /></div>
+                       <div><label className="block text-[10px] font-bold uppercase mb-1">Mayorista</label><input type="number" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" value={formData.priceDozen || ''} onChange={e => setFormData({...formData, priceDozen: Number(e.target.value)})} placeholder="0" /></div>
                    </div>
                </div>
-
                {activeTab === 'Product' && (
-                   <div className="p-4 rounded-xl border border-blue-100 bg-blue-50/50 flex items-center gap-4">
-                       <div className="p-2 bg-white rounded-lg shadow-sm text-blue-600"><Package size={20}/></div>
-                       <div>
-                           <label className="block text-sm font-bold text-gray-800 mb-1">Stock Inicial</label>
-                           <input type="number" min="0" className="w-24 px-3 py-1.5 border border-gray-300 rounded-lg bg-white text-gray-900 font-medium outline-none focus:border-blue-500" value={formData.quantity} onChange={e => setFormData({...formData, quantity: Number(e.target.value)})} />
-                       </div>
-                       <p className="text-xs text-blue-600/70 max-w-[200px] leading-tight">Cantidad física disponible para la venta inmediata.</p>
-                   </div>
+                   <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Stock Inicial</label><input type="number" className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm" value={formData.quantity} onChange={e => setFormData({...formData, quantity: Number(e.target.value)})} /></div>
                )}
-
-               <div className="pt-2 flex gap-3 border-t border-gray-100 mt-4">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 px-6 py-3 border border-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-50 transition-colors bg-white">Cancelar</button>
-                <button type="submit" className="flex-1 px-6 py-3 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 transition-colors shadow-lg shadow-brand-900/20">Guardar Ítem</button>
-              </div>
             </form>
+            <div className="p-4 border-t border-gray-200 bg-white pb-safe-area flex gap-3">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3 border border-gray-200 rounded-xl font-bold text-sm">Cancelar</button>
+                <button onClick={handleSubmit} className="flex-1 py-3 bg-brand-900 text-white rounded-xl font-bold text-sm shadow-lg">Guardar</button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Category Modal */}
       {isCategoryModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-                <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                    <h3 className="font-semibold text-lg text-gray-900">Gestionar Categorías</h3>
-                    <button onClick={() => setIsCategoryModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 backdrop-blur-sm md:p-4">
+            <div className="bg-white w-full h-full md:h-auto md:rounded-2xl md:max-w-md shadow-2xl animate-in zoom-in duration-200 overflow-hidden flex flex-col">
+                <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 pt-safe-top">
+                    <h3 className="font-bold text-lg text-gray-900">Categorías</h3>
+                    <button onClick={() => setIsCategoryModalOpen(false)} className="text-gray-400 p-2 rounded-full"><X size={24} /></button>
                 </div>
-                <div className="p-6">
+                <div className="p-6 flex-1 overflow-y-auto">
                     <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
-                        <input type="text" placeholder={`Nueva categoría...`} className="flex-1 px-3 py-2 border border-gray-200 rounded-xl outline-none bg-white text-gray-900" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)}/>
-                        <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded-xl font-medium"><Plus size={20} /></button>
+                        <input type="text" placeholder={`Nueva categoría...`} className="flex-1 px-4 py-3 border border-gray-200 rounded-xl outline-none bg-white text-gray-900 text-sm" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)}/>
+                        <button type="submit" className="px-4 py-2 bg-brand-900 text-white rounded-xl font-medium shadow-md"><Plus size={24} /></button>
                     </form>
-                    <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                    <div className="space-y-2 pb-20">
                         {categories.filter(c => c.type === activeTab).map(c => (
-                            <div key={c.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
-                                <span className="font-medium text-gray-700">{c.name}</span>
-                                <button onClick={() => handleDeleteCategory(c.id, c.name)} className="text-gray-400 hover:text-red-500"><Trash2 size={16} /></button>
+                            <div key={c.id} className="flex justify-between items-center p-4 bg-gray-50 rounded-xl border border-gray-100">
+                                <span className="font-bold text-gray-700 text-sm">{c.name}</span>
+                                <button onClick={() => handleDeleteCategory(c.id, c.name)} className="text-gray-400 hover:text-red-500 p-2"><Trash2 size={18} /></button>
                             </div>
                         ))}
-                        {categories.filter(c => c.type === activeTab).length === 0 && (
-                            <p className="text-center text-gray-400 text-sm py-4">No hay categorías para {activeTab === 'Service' ? 'Servicios' : 'Productos'}.</p>
-                        )}
                     </div>
                 </div>
             </div>

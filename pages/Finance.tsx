@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { DollarSign, Lock, Unlock, ArrowUp, ArrowDown, History, AlertTriangle, CheckCircle2, Calculator, Save, X, Plus, Trash2, Edit3 } from 'lucide-react';
 import { CashShift, CashTransaction, Sale, User } from '../types';
@@ -20,12 +21,13 @@ export const Finance = () => {
     const [isEditShiftOpen, setIsEditShiftOpen] = useState(false);
     const [editingShift, setEditingShift] = useState<CashShift | null>(null);
     
-    const [amountInput, setAmountInput] = useState<number | string>(''); // String to avoid 0 on start
+    // Use string for input to handle empty state better than 0
+    const [amountInput, setAmountInput] = useState<string>(''); 
     const [descriptionInput, setDescriptionInput] = useState('');
     const [categoryInput, setCategoryInput] = useState<'Sale'|'Supply'|'Service'|'Other'>('Other');
     const [transactionType, setTransactionType] = useState<'Income'|'Expense'>('Expense');
     
-    const [finalCashCount, setFinalCashCount] = useState<number | string>('');
+    const [finalCashCount, setFinalCashCount] = useState<string>('');
 
     const isAdmin = user?.role === 'Admin' || user?.permissions?.includes('all');
 
@@ -89,7 +91,7 @@ export const Finance = () => {
 
     const handleOpenShift = () => {
         if (!user) return;
-        const initial = Number(amountInput) || 0;
+        const initial = parseFloat(amountInput) || 0;
         const newShift: CashShift = {
             id: Math.random().toString(36).substr(2, 9),
             openDate: new Date().toISOString(),
@@ -108,7 +110,7 @@ export const Finance = () => {
     const handleCloseShift = () => {
         if (!currentShift) return;
         
-        const final = Number(finalCashCount) || 0;
+        const final = parseFloat(finalCashCount) || 0;
 
         // Calculate Expected
         const totalIncome = currentShift.transactions.filter(t => t.type === 'Income').reduce((acc, t) => acc + (Number(t.amount)||0), 0);
@@ -135,7 +137,7 @@ export const Finance = () => {
 
     const handleTransaction = () => {
         if (!currentShift || !user) return;
-        const amount = Number(amountInput);
+        const amount = parseFloat(amountInput);
         if (amount <= 0 || isNaN(amount)) {
             alert("Ingrese un monto válido");
             return;
@@ -399,9 +401,9 @@ export const Finance = () => {
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Conteo Físico Real (Bs)</label>
                                     <input autoFocus type="number" className="w-full text-center text-4xl font-bold border-b-2 border-gray-200 focus:border-brand-900 outline-none py-3 text-gray-900 bg-transparent tracking-tight" value={finalCashCount} onChange={e => setFinalCashCount(e.target.value)} placeholder="0.00" />
                                 </div>
-                                {(Number(finalCashCount) > 0) && (
-                                    <div className={`text-center text-sm font-bold ${Math.abs(Number(finalCashCount) - currentBalance) < 0.5 ? 'text-green-600' : 'text-red-500'}`}>
-                                        Diferencia: {(Number(finalCashCount) - currentBalance).toFixed(2)}
+                                {(parseFloat(finalCashCount) > 0) && (
+                                    <div className={`text-center text-sm font-bold ${Math.abs(parseFloat(finalCashCount) - currentBalance) < 0.5 ? 'text-green-600' : 'text-red-500'}`}>
+                                        Diferencia: {(parseFloat(finalCashCount) - currentBalance).toFixed(2)}
                                     </div>
                                 )}
                                 <button onClick={handleCloseShift} className="w-full py-4 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 shadow-lg mt-2 min-h-[56px] active:scale-95 transition-transform">Finalizar Turno</button>

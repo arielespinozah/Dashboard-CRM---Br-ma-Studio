@@ -1,12 +1,45 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Search, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, RefreshCw, ChevronRight, Check, Briefcase, ShoppingBag, Upload, Download, FileSpreadsheet, CreditCard, AlertTriangle, TrendingUp } from 'lucide-react';
-import { Client, Sale, AppSettings, Project } from '../types';
+import { Users, Search, Plus, Mail, Phone, MapPin, Edit3, Trash2, X, RefreshCw, ChevronRight, Check, Briefcase, ShoppingBag, Upload, Download, FileSpreadsheet, CreditCard, AlertTriangle, TrendingUp, MoreHorizontal } from 'lucide-react';
+import { Client, Sale, AppSettings, Project, User as UserType, AuditLog } from '../types';
 import { db } from '../firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
+import { ConfirmationModal } from '../components/ConfirmationModal';
+
+// Local Audit Log Helper
+const logAuditAction = async (action: 'Delete' | 'Update' | 'Create', description: string, user: UserType, metadata?: string) => {
+    const log: AuditLog = {
+        id: Date.now().toString(),
+        action,
+        module: 'Clients',
+        description,
+        user: user.name,
+        role: user.role,
+        timestamp: new Date().toISOString(),
+        metadata
+    };
+    
+    // Save locally
+    const savedLogs = localStorage.getItem('crm_audit_logs');
+    const logs = savedLogs ? JSON.parse(savedLogs) : [];
+    const updatedLogs = [log, ...logs];
+    localStorage.setItem('crm_audit_logs', JSON.stringify(updatedLogs));
+
+    // Save cloud
+    try {
+        await setDoc(doc(db, 'crm_data', 'audit_logs'), { list: updatedLogs });
+    } catch(e) {
+        console.error("Audit sync error", e);
+    }
+};
 
 export const Clients = () => {
+  const [currentUser, setCurrentUser] = useState<UserType | null>(() => {
+      const u = localStorage.getItem('crm_active_user');
+      return u ? JSON.parse(u) : null;
+  });
+
   const [clients, setClients] = useState<Client[]>(() => {
       const saved = localStorage.getItem('crm_clients');
       return saved ? JSON.parse(saved) : [];
@@ -34,6 +67,9 @@ export const Clients = () => {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [drawerTab, setDrawerTab] = useState<'Info' | 'History'>('Info');
 
+  // Confirmation Modal State
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', action: () => {}, type: 'info' as 'info'|'danger'|'success', confirmText: 'Confirmar' });
+
   const [formData, setFormData] = useState<Partial<Client>>({
     name: '', company: '', nit: '', email: '', phone: '', address: '', type: 'Prospect', notes: ''
   });
@@ -43,19 +79,19 @@ export const Clients = () => {
           try {
               const docSnap = await getDoc(doc(db, 'crm_data', 'clients'));
               if (docSnap.exists()) {
-                  const list = docSnap.data().list;
+                  const list = (docSnap.data() as any).list;
                   setClients(list);
                   localStorage.setItem('crm_clients', JSON.stringify(list));
               }
               const salesSnap = await getDoc(doc(db, 'crm_data', 'sales_history'));
               if(salesSnap.exists()) {
-                  setSales(salesSnap.data().list);
-                  localStorage.setItem('crm_sales_history', JSON.stringify(salesSnap.data().list));
+                  setSales((salesSnap.data() as any).list);
+                  localStorage.setItem('crm_sales_history', JSON.stringify((salesSnap.data() as any).list));
               }
               const projSnap = await getDoc(doc(db, 'crm_data', 'projects'));
               if(projSnap.exists()) {
-                  setProjects(projSnap.data().list);
-                  localStorage.setItem('crm_projects', JSON.stringify(projSnap.data().list));
+                  setProjects((projSnap.data() as any).list);
+                  localStorage.setItem('crm_projects', JSON.stringify((projSnap.data() as any).list));
               }
               const settingsSnap = await getDoc(doc(db, 'crm_data', 'settings'));
               if(settingsSnap.exists()) {
@@ -158,10 +194,17 @@ export const Clients = () => {
           });
 
           if (newClients.length > 0) {
-              if (confirm(`Se encontraron ${importedCount} clientes nuevos (${duplicatesSkipped} duplicados omitidos). ¿Importar ahora?`)) {
-                  setClients(prev => [...prev, ...newClients]);
-                  alert('Clientes importados exitosamente.');
-              }
+              setConfirmModal({
+                  isOpen: true,
+                  title: 'Importar Clientes',
+                  message: `Se encontraron ${importedCount} clientes nuevos (${duplicatesSkipped} duplicados omitidos). ¿Importar ahora?`,
+                  type: 'success',
+                  confirmText: 'Importar',
+                  action: () => {
+                      setClients(prev => [...prev, ...newClients]);
+                      if(currentUser) logAuditAction('Create', `Importación masiva: ${importedCount} clientes`, currentUser);
+                  }
+              });
           } else {
               alert('No se encontraron clientes nuevos para importar.');
           }
@@ -185,18 +228,32 @@ export const Clients = () => {
     const hasProjects = projects.some(p => p.client === client.name); 
 
     if (hasSales || hasProjects) {
-        alert('ADVERTENCIA: No se puede eliminar este cliente porque tiene ventas o proyectos asociados. Considere cambiar su estado a "Prospecto" o agregar una nota de "Inactivo" para mantener el historial.');
+        setConfirmModal({
+            isOpen: true,
+            title: 'No se puede eliminar',
+            message: 'Este cliente tiene ventas o proyectos asociados. Considere cambiar su estado a "Prospecto" o agregar una nota.',
+            type: 'info',
+            confirmText: 'Entendido',
+            action: () => {}
+        });
         return;
     }
 
-    if (confirm('¿Eliminar cliente permanentemente? Esta acción no se puede deshacer.')) {
-      setClients(prev => prev.filter(c => c.id !== id));
-      if (selectedClient?.id === id) setSelectedClient(null);
-    }
+    setConfirmModal({
+        isOpen: true,
+        title: 'Eliminar Cliente',
+        message: '¿Eliminar cliente permanentemente? Esta acción no se puede deshacer.',
+        type: 'danger',
+        confirmText: 'Eliminar',
+        action: () => {
+            setClients(prev => prev.filter(c => c.id !== id));
+            if (selectedClient?.id === id) setSelectedClient(null);
+            if(currentUser) logAuditAction('Delete', `Eliminó cliente: ${client.name}`, currentUser);
+        }
+    });
   };
 
   const handleConvertToClient = (client: Client) => {
-      // Duplicate check for official clients (NIT/Email strictness)
       const duplicate = clients.find(c => c.type === 'Client' && c.id !== client.id && ( (c.nit && c.nit === client.nit) || (c.email && c.email === client.email) ));
       
       if (duplicate) {
@@ -204,11 +261,19 @@ export const Clients = () => {
           return;
       }
 
-      if (confirm(`¿Convertir a ${client.name} en Cliente oficial?`)) {
-          const updatedClient = { ...client, type: 'Client' as const };
-          setClients(prev => prev.map(c => c.id === client.id ? updatedClient : c));
-          setSelectedClient(updatedClient);
-      }
+      setConfirmModal({
+          isOpen: true,
+          title: 'Confirmar Conversión',
+          message: `¿Convertir a ${client.name} en Cliente oficial?`,
+          type: 'success',
+          confirmText: 'Convertir',
+          action: () => {
+              const updatedClient = { ...client, type: 'Client' as const };
+              setClients(prev => prev.map(c => c.id === client.id ? updatedClient : c));
+              setSelectedClient(updatedClient);
+              if(currentUser) logAuditAction('Update', `Convirtió a cliente: ${client.name}`, currentUser);
+          }
+      });
   };
 
   const openNewClient = () => {
@@ -221,6 +286,7 @@ export const Clients = () => {
     e.preventDefault();
     if (editingId) {
         setClients(prev => prev.map(c => c.id === editingId ? { ...c, ...formData } as Client : c));
+        if(currentUser) logAuditAction('Update', `Editó cliente: ${formData.name}`, currentUser);
     } else {
         const newClient: Client = {
             id: Math.random().toString(36).substr(2, 9),
@@ -235,6 +301,7 @@ export const Clients = () => {
             notes: formData.notes
         };
         setClients(prev => [...prev, newClient]);
+        if(currentUser) logAuditAction('Create', `Creó cliente: ${newClient.name}`, currentUser);
     }
     setIsModalOpen(false);
   };
@@ -255,32 +322,51 @@ export const Clients = () => {
 
   return (
     <div className="space-y-6 h-full flex flex-col relative pb-safe-area">
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-        <div>
+      <ConfirmationModal 
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal({...confirmModal, isOpen: false})}
+        onConfirm={confirmModal.action}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        type={confirmModal.type}
+        confirmText={confirmModal.confirmText}
+      />
+
+      {/* Header - Improved Mobile Layout */}
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+        <div className="w-full xl:w-auto">
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Clientes</h1>
           <p className="text-sm text-gray-500">Gestiona tu cartera de clientes y prospectos</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-             {!isLoaded && <span className="text-xs text-brand-900 flex items-center gap-1"><RefreshCw className="animate-spin" size={12}/> Sync</span>}
-            
-            <button onClick={handleDownloadTemplate} className="px-4 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 min-h-[44px]" title="Descargar formato">
-                <FileSpreadsheet size={18}/> <span className="hidden sm:inline">Plantilla</span>
-            </button>
-            <div className="relative">
-                <input type="file" accept=".xlsx, .xls" onChange={handleImportExcel} className="absolute inset-0 w-full opacity-0 cursor-pointer" title="Importar Excel"/>
-                <button className="px-4 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 min-h-[44px]">
-                    <Upload size={18}/> <span className="hidden sm:inline">Importar</span>
+        
+        {/* Actions Bar - Horizontal Scroll on Mobile */}
+        <div className="w-full xl:w-auto overflow-x-auto pb-1 xl:pb-0 scrollbar-hide">
+            <div className="flex gap-2 min-w-max">
+                {!isLoaded && <span className="text-xs text-brand-900 flex items-center gap-1 bg-brand-50 px-2 rounded-lg border border-brand-100"><RefreshCw className="animate-spin" size={12}/> Sync</span>}
+                
+                <button onClick={handleDownloadTemplate} className="px-4 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 min-h-[44px]" title="Descargar formato">
+                    <FileSpreadsheet size={18}/> <span className="hidden sm:inline">Plantilla</span>
+                </button>
+                
+                <div className="relative">
+                    <input type="file" accept=".xlsx, .xls" onChange={handleImportExcel} className="absolute inset-0 w-full opacity-0 cursor-pointer" title="Importar Excel"/>
+                    <button className="px-4 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 min-h-[44px]">
+                        <Upload size={18}/> <span className="hidden sm:inline">Importar</span>
+                    </button>
+                </div>
+                
+                <button onClick={handleExportExcel} className="px-4 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 min-h-[44px]">
+                    <Download size={18}/> <span className="hidden sm:inline">Exportar</span>
+                </button>
+                
+                <button onClick={openNewClient} disabled={!isLoaded} className="flex items-center gap-2 px-5 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-bold hover:bg-brand-800 shadow-lg shadow-brand-900/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]">
+                    <Plus size={18} /> Nuevo
                 </button>
             </div>
-            <button onClick={handleExportExcel} className="px-4 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 flex items-center gap-2 min-h-[44px]">
-                <Download size={18}/> <span className="hidden sm:inline">Exportar</span>
-            </button>
-            <button onClick={openNewClient} disabled={!isLoaded} className="flex items-center gap-2 px-5 py-2.5 bg-brand-900 text-white rounded-xl text-sm font-bold hover:bg-brand-800 shadow-lg shadow-brand-900/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]">
-                <Plus size={18} /> Nuevo
-            </button>
         </div>
       </div>
 
+      {/* Tabs & Search - Stacked on Mobile */}
       <div className="flex flex-col md:flex-row gap-4 justify-between items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm">
           <div className="flex p-1 bg-gray-100 rounded-lg w-full md:w-auto">
               <button onClick={() => setActiveTab('All')} className={`flex-1 md:flex-none px-6 py-2 rounded-md text-sm font-bold transition-all min-h-[40px] ${activeTab === 'All' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Todos</button>
@@ -289,10 +375,11 @@ export const Clients = () => {
           </div>
           <div className="relative w-full md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Buscar nombre, empresa..." className="w-full pl-10 pr-4 py-2.5 bg-transparent text-sm text-gray-900 outline-none placeholder:text-gray-400 border border-gray-100 rounded-lg focus:border-brand-300 transition-colors"/>
+            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Buscar nombre, empresa..." className="w-full pl-10 pr-4 py-2.5 bg-gray-50 text-base md:text-sm text-gray-900 outline-none placeholder:text-gray-400 border border-transparent focus:bg-white focus:border-brand-300 rounded-xl transition-colors min-h-[44px]"/>
           </div>
       </div>
 
+      {/* Desktop Headers */}
       <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 text-xs font-bold text-gray-700 uppercase tracking-wider bg-gray-100 rounded-t-xl border-b border-gray-200">
           <div className="col-span-4">Nombre / Empresa</div>
           <div className="col-span-3">Contacto</div>
@@ -300,13 +387,14 @@ export const Clients = () => {
           <div className="col-span-2 text-right">Estado</div>
       </div>
 
+      {/* Client List */}
       <div className="flex-1 overflow-y-auto space-y-3 pb-12 bg-white md:bg-transparent rounded-b-xl border border-gray-100 md:border-none">
         {filteredClients.map(client => {
             const ltv = getClientLTV(client);
             return (
-              <div key={client.id} onClick={() => { setSelectedClient(client); setDrawerTab('Info'); }} className={`bg-white rounded-xl p-4 border transition-all cursor-pointer group hover:shadow-md relative overflow-hidden ${selectedClient?.id === client.id ? 'border-brand-500 ring-1 ring-brand-200 bg-brand-50/10' : 'border-gray-100 hover:border-brand-200'}`}>
+              <div key={client.id} onClick={() => { setSelectedClient(client); setDrawerTab('Info'); }} className={`bg-white rounded-xl p-4 border transition-all cursor-pointer group hover:shadow-md relative overflow-hidden active:scale-[0.98] ${selectedClient?.id === client.id ? 'border-brand-500 ring-1 ring-brand-200 bg-brand-50/10' : 'border-gray-100 hover:border-brand-200'}`}>
                 {/* Mobile Status Strip */}
-                <div className={`absolute left-0 top-0 bottom-0 w-1.5 md:hidden ${client.type === 'Client' ? 'bg-blue-500' : 'bg-orange-500'}`}></div>
+                <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${client.type === 'Client' ? 'bg-blue-500' : 'bg-orange-500'}`}></div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center pl-3 md:pl-0">
                     <div className="col-span-1 md:col-span-4 flex items-center gap-4">
@@ -338,14 +426,15 @@ export const Clients = () => {
         {filteredClients.length === 0 && <div className="text-center py-20 text-gray-400"><p>No se encontraron registros.</p></div>}
       </div>
 
-      {/* Client Details Drawer */}
+      {/* Client Details Drawer - IMPROVED LAYOUT */}
       {selectedClient && (
-          <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-white shadow-2xl z-[100] border-l border-gray-200 animate-in slide-in-from-right duration-300 flex flex-col">
-              <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+          <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-white shadow-2xl z-[200] border-l border-gray-200 animate-in slide-in-from-right duration-300 flex flex-col">
+              {/* Header */}
+              <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex-shrink-0 pt-safe-top">
                   <div className="flex justify-between items-start mb-4">
                       <div className="flex gap-4 items-center">
                           <div className="w-16 h-16 rounded-full bg-white border-2 border-white shadow-md flex items-center justify-center text-2xl font-bold text-gray-700">{selectedClient.name.charAt(0)}</div>
-                          <div><h2 className="text-xl font-bold text-gray-900">{selectedClient.name}</h2><p className="text-sm text-gray-500 font-medium">{selectedClient.company}</p></div>
+                          <div><h2 className="text-xl font-bold text-gray-900 leading-tight">{selectedClient.name}</h2><p className="text-sm text-gray-500 font-medium">{selectedClient.company}</p></div>
                       </div>
                       <button onClick={() => setSelectedClient(null)} className="text-gray-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-full transition-colors"><X size={24}/></button>
                   </div>
@@ -356,7 +445,8 @@ export const Clients = () => {
                   </div>
               </div>
               
-              <div className="p-6 flex-1 overflow-y-auto">
+              {/* Scrollable Content */}
+              <div className="flex-1 overflow-y-auto p-6">
                   {drawerTab === 'Info' ? (
                       <div className="space-y-6">
                           {selectedClient.type === 'Prospect' ? (
@@ -413,7 +503,9 @@ export const Clients = () => {
                                       <div key={p.id} className="mb-3 bg-white border border-gray-200 p-3 rounded-lg flex justify-between items-center shadow-sm">
                                           <div>
                                               <p className="text-sm font-bold text-gray-900">{p.title}</p>
-                                              <span className="text-[10px] px-2 py-0.5 bg-gray-100 rounded-md text-gray-600 uppercase">{p.status}</span>
+                                              <span className="text-[10px] px-2 py-0.5 bg-gray-100 rounded-md text-gray-600 uppercase">
+                                                  {p.status === 'IN_PROGRESS' ? 'En Curso' : p.status === 'COMPLETED' ? 'Completado' : p.status === 'ON_HOLD' ? 'Pausado' : 'Planificado'}
+                                              </span>
                                           </div>
                                           <div className="text-right">
                                               <p className="text-xs text-gray-500">{new Date(p.dueDate).toLocaleDateString()}</p>
@@ -451,47 +543,49 @@ export const Clients = () => {
                   )}
               </div>
 
+              {/* Fixed Footer */}
               {drawerTab === 'Info' && (
-                  <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex gap-3">
-                      <button onClick={() => handleEdit(selectedClient)} className="flex-1 py-3 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 flex items-center justify-center gap-2 shadow-sm transition-colors min-h-[48px]"><Edit3 size={18}/> Editar</button>
-                      <button onClick={() => handleDelete(selectedClient.id)} className="flex-1 py-3 bg-white border border-red-100 text-red-600 font-bold rounded-xl hover:bg-red-50 flex items-center justify-center gap-2 shadow-sm transition-colors min-h-[48px]"><Trash2 size={18}/> Eliminar</button>
+                  <div className="p-4 border-t border-gray-200 bg-white sticky bottom-0 z-20 grid grid-cols-2 gap-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] pb-safe-area">
+                      <button onClick={() => handleEdit(selectedClient)} className="flex items-center justify-center gap-2 py-3 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 shadow-sm transition-colors min-h-[48px]"><Edit3 size={18}/> Editar</button>
+                      <button onClick={() => handleDelete(selectedClient.id)} className="flex items-center justify-center gap-2 py-3 bg-white border border-red-100 text-red-600 font-bold rounded-xl hover:bg-red-50 shadow-sm transition-colors min-h-[48px]"><Trash2 size={18}/> Eliminar</button>
                   </div>
               )}
           </div>
       )}
 
-      {/* Modal Form */}
+      {/* Modal Form - Full Screen Mobile */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200 my-8">
-            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm md:p-4 overflow-hidden">
+          <div className="bg-white w-full h-full md:h-auto md:max-w-lg md:rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 pt-safe-top sticky top-0 z-10">
               <h3 className="font-semibold text-lg text-gray-900">{editingId ? 'Editar Cliente' : 'Nuevo Cliente'}</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-red-600 hover:bg-red-50 p-1 rounded-full"><X size={20} /></button>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-full"><X size={24} /></button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Nombre Completo</label><input required type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[44px]" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
-                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label><input type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[44px]" value={formData.company} onChange={e => setFormData({...formData, company: e.target.value})} /></div>
+                 <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Nombre Completo</label><input required type="text" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+                 <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Empresa</label><input type="text" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.company} onChange={e => setFormData({...formData, company: e.target.value})} /></div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                 <div><label className="block text-sm font-medium text-gray-700 mb-1">{settings?.taxIdLabel || 'NIT'}</label><input type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[44px]" value={formData.nit} onChange={e => setFormData({...formData, nit: e.target.value})} /></div>
-                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Teléfono</label><input type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[44px]" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} /></div>
+                 <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">{settings?.taxIdLabel || 'NIT'}</label><input type="text" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.nit} onChange={e => setFormData({...formData, nit: e.target.value})} /></div>
+                 <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Teléfono</label><input type="text" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} /></div>
               </div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Email</label><input type="email" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[44px]" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Dirección</label><input type="text" className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[44px]" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
+              <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Email</label><input type="email" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
+              <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Dirección</label><input type="text" className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 min-h-[48px] text-base md:text-sm" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} /></div>
               <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                  <label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Tipo</label>
                   <div className="relative">
-                      <select className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 appearance-none min-h-[44px]" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})}><option value="Prospect" className="bg-white text-gray-900">Prospecto</option><option value="Client" className="bg-white text-gray-900">Cliente</option></select>
+                      <select className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 appearance-none min-h-[48px] text-base md:text-sm" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})}><option value="Prospect" className="bg-white text-gray-900">Prospecto</option><option value="Client" className="bg-white text-gray-900">Cliente</option></select>
                       <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 rotate-90 pointer-events-none" size={16}/>
                   </div>
               </div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Notas</label><textarea className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 h-24 resize-none" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} placeholder="Información adicional..." /></div>
-              <div className="pt-4 flex gap-3">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 px-6 py-3 border border-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-50 transition-colors bg-white min-h-[48px]">Cancelar</button>
-                <button type="submit" className="flex-1 px-6 py-3 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 transition-colors shadow-lg shadow-brand-900/20 min-h-[48px]">Guardar</button>
-              </div>
+              <div><label className="block text-xs font-bold text-gray-500 mb-1.5 uppercase">Notas</label><textarea className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-900 outline-none bg-white text-gray-900 h-24 resize-none text-base md:text-sm" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} placeholder="Información adicional..." /></div>
             </form>
+            {/* Sticky Footer */}
+            <div className="p-4 border-t border-gray-200 bg-white pb-safe-area flex gap-3 shrink-0">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 px-6 py-3 border border-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-50 transition-colors bg-white min-h-[48px]">Cancelar</button>
+                <button onClick={handleSubmit} className="flex-1 px-6 py-3 bg-brand-900 text-white rounded-xl font-bold hover:bg-brand-800 transition-colors shadow-lg shadow-brand-900/20 min-h-[48px]">Guardar</button>
+            </div>
           </div>
         </div>
       )}

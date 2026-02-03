@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, Suspense } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
@@ -82,33 +83,20 @@ function App() {
     init();
   }, []);
 
-  const handleLogin = (email: string) => {
-      const savedUsers = localStorage.getItem('crm_users');
-      let foundUser: User | undefined;
+  const handleLogin = (validatedUser: User) => {
+      // SECURITY FIX: User is already validated and sanitized by Login.tsx
+      setUser(validatedUser);
+      localStorage.setItem('crm_active_user', JSON.stringify(validatedUser));
       
-      if (savedUsers) {
-          const parsedUsers: User[] = JSON.parse(savedUsers);
-          foundUser = parsedUsers.find(u => u.email === email);
-      }
-
-      if (!foundUser) {
-          if (email === 'admin@brama.com.bo') {
-              foundUser = { id: '1', name: 'Admin Principal', email, role: 'Admin', active: true };
-          } else if (email === 'ventas@brama.com.bo') {
-              foundUser = { id: '2', name: 'Vendedor 1', email, role: 'Sales', active: true };
-          }
-      }
-      
-      if (foundUser) {
-          setUser(foundUser);
-          localStorage.setItem('crm_active_user', JSON.stringify(foundUser));
-          if (!auth.currentUser) signInAnonymously(auth).catch(() => {});
-      }
+      // Ensure firebase connection for DB writes
+      if (!auth.currentUser) signInAnonymously(auth).catch(() => {});
   };
 
   const handleLogout = () => {
       setUser(null);
       localStorage.removeItem('crm_active_user');
+      // Clean up potentially sensitive cached lists if any (optional but safer)
+      localStorage.removeItem('crm_users'); 
   };
 
   if (loading) return <div className="h-screen w-screen flex items-center justify-center bg-gray-50 text-brand-900 font-medium animate-pulse">Iniciando Sistema...</div>;

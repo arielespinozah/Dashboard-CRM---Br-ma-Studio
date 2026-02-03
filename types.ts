@@ -81,6 +81,8 @@ export interface Quote {
   notes?: string;
   taxEnabled?: boolean;
   termsAndConditions?: string; // New field for custom terms
+  customLabel?: string; // NEW: Custom text (e.g. FACTURADO)
+  showCustomLabel?: boolean; // NEW: Toggle for custom text
 }
 
 export interface Sale {
@@ -98,6 +100,10 @@ export interface Sale {
   paymentStatus: 'Pending' | 'Partial' | 'Paid';
   paymentMethod: 'Cash' | 'Transfer' | 'QR' | 'Card';
   notes?: string;
+  salesNote?: string; // Legacy custom note
+  receiptInfo?: string; // NEW: Specific info box for receipt (e.g. disclaimer)
+  customLabel?: string; // NEW: Custom text label (e.g. ENTREGADO)
+  showCustomLabel?: boolean; // NEW: Toggle for custom text
 }
 
 export interface InventoryItem {
@@ -116,6 +122,7 @@ export interface InventoryItem {
   type?: 'Product' | 'Service';
   description?: string; 
   stock?: number; 
+  keywords?: string; // NEW: Alias for automatic deduction matching (e.g. "Credencial, Gift Card")
 }
 
 export interface AppSettings {
@@ -125,6 +132,11 @@ export interface AppSettings {
   secondaryColor?: string; // Used for Accents & Icons
   systemLogoUrl?: string; // LOGO FOR LOGIN & SIDEBAR (Colored)
   
+  // Social Media
+  socialPreviewUrl?: string; // Image for link previews
+  socialShareTitle?: string; // Custom Title for shared links
+  socialShareDescription?: string; // Custom Description for shared links
+
   // PDF Specifics
   logoUrl?: string; // LOGO FOR PDF (White/Document version)
   pdfSenderInfo: string; 
@@ -141,6 +153,14 @@ export interface AppSettings {
   qrCodeUrl?: string; 
   termsAndConditions: string;
   
+  // Sales Receipt Specifics
+  salesNote?: string; // NEW: Default note for sales receipts
+  receiptInfo?: string; // NEW: Default info text for receipts
+  customReceiptLabel?: string; // NEW: Default label for receipts
+
+  // Quotation Specifics
+  customQuotationLabel?: string; // NEW: Default text for custom label (e.g. FACTURADO)
+
   signatureName: string;
   signatureTitle: string;
   signatureUrl?: string; 
@@ -172,6 +192,7 @@ export interface User {
   active: boolean;
   password?: string;
   permissions?: string[]; 
+  twoFactorEnabled?: boolean; // NEW: 2FA Flag
   // Permissions List: 'view_dashboard', 'view_finance', 'view_sales', 'view_quotes', 'view_projects', 'view_inventory', 'view_clients', 'view_calendar', 'view_reports', 'manage_settings'
 }
 
@@ -196,6 +217,19 @@ export interface ChatMessage {
   text: string;
   sender: 'me' | 'client';
   timestamp: string;
+  via?: 'api' | 'link';
+}
+
+export interface WhatsAppConfig {
+    phoneId: string;
+    accessToken: string;
+    businessAccountId?: string;
+}
+
+export interface ChatTemplate {
+    id: string;
+    name: string;
+    content: string;
 }
 
 // Finance Types
@@ -241,6 +275,6 @@ export interface CalendarEvent {
 
 export interface AuthContextType {
   user: User | null;
-  login: (email: string) => void;
+  login: (user: User) => void;
   logout: () => void;
 }

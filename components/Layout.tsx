@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './Sidebar';
 import { Menu, Bell, ChevronDown, User as UserIcon, LogOut, Settings, CheckCircle2, AlertTriangle, Info, Clock, Calendar } from 'lucide-react';
-import { User, AppSettings, CalendarEvent, Project, Status } from '../types';
-import { Link, useNavigate } from 'react-router-dom';
+import { User, AppSettings, CalendarEvent } from '../types';
+import { useNavigate } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -49,13 +49,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
       const fetchNotifications = async () => {
           let newNotifs: Notification[] = [];
           
-          // 1. Calendar Events (Today/Tomorrow)
           try {
               let events: CalendarEvent[] = [];
               const calDoc = await getDoc(doc(db, 'crm_data', 'calendar'));
-              if(calDoc.exists()) events = calDoc.data().list;
+              if(calDoc.exists()) events = (calDoc.data() as any).list;
               else {
-                  const local = localStorage.getItem('crm_data_calendar'); // Backup
+                  const local = localStorage.getItem('crm_data_calendar'); 
                   if(local) events = JSON.parse(local).list || [];
               }
 
@@ -87,38 +86,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
                   }
               });
           } catch(e) {}
-
-          // 2. Project Deadlines (Next 3 days)
-          try {
-              let projects: Project[] = [];
-              const projDoc = await getDoc(doc(db, 'crm_data', 'projects'));
-              if(projDoc.exists()) projects = projDoc.data().list;
-              
-              const now = new Date();
-              projects.forEach(p => {
-                  if(p.status !== Status.COMPLETED) {
-                      const due = new Date(p.dueDate);
-                      const diffTime = due.getTime() - now.getTime();
-                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-                      
-                      if (diffDays >= 0 && diffDays <= 3) {
-                          newNotifs.push({
-                              id: `proj-${p.id}`,
-                              title: 'Entrega de Proyecto',
-                              message: `"${p.title}" vence en ${diffDays} días.`,
-                              type: 'warning',
-                              read: false,
-                              time: diffDays === 0 ? 'Hoy' : `${diffDays} días`
-                          });
-                      }
-                  }
-              });
-          } catch(e) {}
-
-          // Fallback if empty
-          if(newNotifs.length === 0) {
-              // Optional: Add a system welcome
-          }
           
           setNotifications(newNotifs);
       };
@@ -147,7 +114,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
 
   return (
     <div className="flex h-screen bg-[#f4f6f7] overflow-hidden">
-      {/* Mobile Backdrop - High Z-Index */}
+      {/* Mobile Backdrop */}
       {mobileMenuOpen && (
         <div 
           className="fixed inset-0 z-[60] bg-brand-900/50 lg:hidden backdrop-blur-sm transition-opacity"
@@ -155,7 +122,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
         />
       )}
 
-      {/* Sidebar - Higher Z-Index than header on mobile */}
+      {/* Sidebar */}
       <div className={`fixed inset-y-0 left-0 z-[70] w-64 transform bg-white border-r border-gray-200 transition-transform duration-300 ease-out lg:static lg:translate-x-0 shadow-2xl lg:shadow-none ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <Sidebar 
             onCloseMobile={() => setMobileMenuOpen(false)} 
@@ -167,7 +134,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         
-        {/* Modern Header */}
+        {/* Header */}
         <header className="bg-white border-b border-gray-200 h-16 md:h-20 px-4 md:px-6 flex items-center justify-between shadow-sm z-30 relative shrink-0">
             <div className="flex items-center gap-3">
                 <button 
